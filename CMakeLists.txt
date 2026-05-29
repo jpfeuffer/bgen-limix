@@ -35,6 +35,13 @@ include(FetchContent)
 # --- zlib-ng (native API) ---
 if(BGEN_USE_SYSTEM_ZLIB_NG)
   find_package(zlib-ng REQUIRED)
+  # conda-forge and some distros only install the static variant
+  if(NOT TARGET zlib-ng::zlib-ng AND TARGET zlib-ng::zlib-ng-static)
+    add_library(zlib-ng::zlib-ng ALIAS zlib-ng::zlib-ng-static)
+  endif()
+  if(NOT TARGET zlib-ng::zlib-ng)
+    message(FATAL_ERROR "zlib-ng found but neither zlib-ng::zlib-ng nor zlib-ng::zlib-ng-static target exists")
+  endif()
 else()
   message(STATUS "Fetching zlib-ng via FetchContent ...")
   set(ZLIB_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
