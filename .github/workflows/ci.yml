@@ -29,11 +29,9 @@ jobs:
       - uses: prefix-dev/setup-pixi@v0.9.6
 
       - name: Configure CMake
-        shell: bash
         run: >
-          pixi run cmake -B build -G Ninja
+          pixi run cmake --preset pixi
           -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
-          "-DCMAKE_PREFIX_PATH=$CONDA_PREFIX;$CONDA_PREFIX/Library"
           -DBGEN_BUILD_TESTS=ON
           -DBGEN_BUILD_PYTHON=OFF
           -DBGEN_ENABLE_SANITIZERS=${{ matrix.sanitizers }}

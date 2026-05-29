@@ -34,7 +34,7 @@ build = { features = ["python"], solve-group = "default" }
 test = { features = ["python", "test"], solve-group = "default" }
 
 [tasks]
-configure = "cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=$CONDA_PREFIX"
+configure = "cmake --preset pixi -DCMAKE_BUILD_TYPE=Release"
 build-c = { cmd = "cmake --build build", depends-on = ["configure"] }
 test-c = { cmd = "ctest --test-dir build --output-on-failure", depends-on = ["build-c"] }
 build-python = "pip install --no-build-isolation -e ."
