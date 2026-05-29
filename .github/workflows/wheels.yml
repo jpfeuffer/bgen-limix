@@ -45,9 +45,6 @@ jobs:
           # Build for CPython 3.11–3.14
           CIBW_BUILD: "cp311-* cp312-* cp313-* cp314-*"
           CIBW_SKIP: "*-musllinux_i686"
-          # Use manylinux2014 for broad compatibility
-          CIBW_MANYLINUX_X86_64_IMAGE: manylinux2014
-          CIBW_MANYLINUX_AARCH64_IMAGE: manylinux2014
           # Test the built wheels
           CIBW_TEST_REQUIRES: pytest
           CIBW_TEST_COMMAND: pytest {project}/python/tests -v

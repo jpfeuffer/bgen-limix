@@ -19,11 +19,12 @@ def test_haplotypes_basic():
         assert samples == ["sample_0", "sample_1", "sample_2", "sample_3"]
 
 
-def test_haplotypes_genotype():
+def test_haplotypes_genotype(tmp_path):
     filepath = example.get("haplotypes.bgen")
-    mfpath = example.get("haplotypes.bgen.metafile")
+    mfpath = tmp_path / "haplotypes.bgen.metafile"
 
     with BgenFile(str(filepath)) as bgen:
+        bgen.create_metafile(str(mfpath))
         with BgenMetafile(str(mfpath)) as mf:
             assert mf.npartitions == 1
             assert mf.nvariants == 4
@@ -55,8 +56,12 @@ def test_metafile_creation(tmp_path):
             assert mf.nvariants == 4
 
 
-def test_variant_info():
-    mfpath = example.get("haplotypes.bgen.metafile")
+def test_variant_info(tmp_path):
+    filepath = example.get("haplotypes.bgen")
+    mfpath = tmp_path / "haplotypes.bgen.metafile"
+
+    with BgenFile(str(filepath)) as bgen:
+        bgen.create_metafile(str(mfpath))
 
     with BgenMetafile(str(mfpath)) as mf:
         part = mf.read_partition(0)

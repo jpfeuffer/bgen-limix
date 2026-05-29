@@ -13,14 +13,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-14, windows-2022]
+        os: [ubuntu-24.04, macos-15, windows-2025]
         build_type: [Release, Debug]
         include:
           - os: ubuntu-24.04
             sanitizers: ON
-          - os: macos-14
+          - os: macos-15
             sanitizers: OFF
-          - os: windows-2022
+          - os: windows-2025
             sanitizers: OFF
 
     steps:
@@ -29,10 +29,11 @@ jobs:
       - uses: prefix-dev/setup-pixi@v0.9.6
 
       - name: Configure CMake
+        shell: bash
         run: >
           pixi run cmake -B build -G Ninja
           -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
-          -DCMAKE_PREFIX_PATH=$CONDA_PREFIX
+          "-DCMAKE_PREFIX_PATH=$CONDA_PREFIX;$CONDA_PREFIX/Library"
           -DBGEN_BUILD_TESTS=ON
           -DBGEN_BUILD_PYTHON=OFF
           -DBGEN_ENABLE_SANITIZERS=${{ matrix.sanitizers }}
