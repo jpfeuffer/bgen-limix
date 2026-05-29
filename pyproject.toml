@@ -35,6 +35,7 @@ test = ["pytest>=7"]
 
 [tool.scikit-build]
 cmake.build-type = "Release"
+build.build-dir = "build-python"
 cmake.args = [
   "-DBGEN_BUILD_TESTS=OFF",
   "-DBGEN_BUILD_PYTHON=ON",

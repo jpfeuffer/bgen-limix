@@ -228,6 +228,14 @@ if(BGEN_ENABLE_S3)
   target_link_libraries(bgen PRIVATE ${_bgen_curl})
 endif()
 
+# On MinGW, statically link the C++/GCC runtime so test executables (and any
+# downstream user) don't depend on libstdc++-6.dll / libgcc_s_seh-1.dll at
+# runtime.  Without this, Git-for-Windows ships older copies of those DLLs
+# earlier in PATH and causes STATUS_ENTRYPOINT_NOT_FOUND (0xC0000139).
+if(MINGW)
+  target_link_options(bgen INTERFACE -static-libstdc++ -static-libgcc)
+endif()
+
 target_compile_options(bgen PRIVATE
   $<$<COMPILE_LANGUAGE:C>:${BGEN_C_WARNING_FLAGS}>
   $<$<COMPILE_LANGUAGE:CXX>:${BGEN_CXX_WARNING_FLAGS}>)

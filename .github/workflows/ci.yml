@@ -47,10 +47,12 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          # pixi run resets PATH, so call ctest directly with the pixi DLL
-          # directory prepended so the test executables can find their deps.
+          # pixi run resets PATH; prepend Library\bin for the conda DLLs
+          # (zlib-ng, zstd, libcurl …).  libstdc++ / libgcc are now statically
+          # linked via the MINGW target_link_options in CMakeLists.txt, so
+          # there is no MinGW DLL version conflict any more.
           $pixi_bin = "${{ github.workspace }}\.pixi\envs\default\Library\bin"
-          $env:PATH = "$pixi_bin;$env:PATH"
+          $env:PATH = "$pixi_bin;C:\mingw64\bin;$env:PATH"
           & "$pixi_bin\ctest.exe" --test-dir "${{ github.workspace }}\build" `
             -C ${{ matrix.build_type }} --output-on-failure
   test-python:
