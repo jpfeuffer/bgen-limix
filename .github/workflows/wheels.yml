@@ -54,6 +54,10 @@ jobs:
           CIBW_ARCHS_LINUX: "x86_64 aarch64"
           # Windows: build AMD64 only
           CIBW_ARCHS_WINDOWS: "AMD64"
+          # Install OpenSSL headers needed by fetched curl on Linux
+          CIBW_BEFORE_BUILD_LINUX: >
+            (command -v yum && yum install -y openssl-devel) ||
+            (command -v apk && apk add openssl-dev) || true
 
       - uses: actions/upload-artifact@v7.0.1
         with:
