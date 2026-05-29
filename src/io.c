@@ -17,6 +17,7 @@
 #define LONG_TELL ftello64
 #elif defined(_WIN32) && !defined(__DJGPP__)
 #include <windows.h>
+#include <io.h>
 static int LONG_SEEK(FILE* file, __int64 offset, int origin)
 {
     LARGE_INTEGER off;
