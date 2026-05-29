@@ -38,7 +38,7 @@ cmake.build-type = "Release"
 cmake.args = [
   "-DBGEN_BUILD_TESTS=OFF",
   "-DBGEN_BUILD_PYTHON=ON",
-  "-DBGEN_USE_SYSTEM_ZLIB=OFF",
+  "-DBGEN_USE_SYSTEM_ZLIB_NG=OFF",
   "-DBGEN_USE_SYSTEM_ZSTD=OFF",
   "-DBGEN_USE_SYSTEM_ATHR=OFF",
 ]
