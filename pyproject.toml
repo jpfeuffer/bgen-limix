@@ -41,6 +41,7 @@ cmake.args = [
   "-DBGEN_USE_SYSTEM_ZLIB_NG=OFF",
   "-DBGEN_USE_SYSTEM_ZSTD=OFF",
   "-DBGEN_USE_SYSTEM_ATHR=OFF",
+  "-DBGEN_USE_SYSTEM_CURL=OFF",
 ]
 wheel.packages = ["python/cbgen"]
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Union
 
@@ -10,6 +11,7 @@ import numpy.typing as npt
 
 from cbgen._core import BgenFile as _BgenFile
 from cbgen._core import BgenMetafile as _BgenMetafile
+from cbgen._s3_utils import s3_env_from_storage_options
 from cbgen.typing import Genotype, Partition, Variants
 
 __all__ = ["bgen_file", "bgen_metafile"]
@@ -25,12 +27,17 @@ class bgen_file:
         BGEN file path.
     """
 
-    def __init__(self, filepath: Union[str, Path]):
-        self._filepath = Path(filepath)
-        self._impl = _BgenFile(str(self._filepath))
+    def __init__(self, filepath: Union[str, "os.PathLike[str]"]):
+        s = str(filepath)
+        if s.startswith("s3://"):
+            self._filepath = filepath
+        else:
+            self._filepath = Path(filepath)
+        with s3_env_from_storage_options(filepath):
+            self._impl = _BgenFile(str(self._filepath))
 
     @property
-    def filepath(self) -> Path:
+    def filepath(self) -> "Union[Path, os.PathLike[str], str]":
         """File path."""
         return self._filepath
 

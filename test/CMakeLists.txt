@@ -2,7 +2,7 @@ function(bgen_add_test name)
   set(target test_${name})
   add_executable(${target} src/${name}.c)
   target_link_libraries(${target} PRIVATE BGEN::bgen)
-  target_compile_options(${target} PRIVATE ${BGEN_WARNING_FLAGS})
+  target_compile_options(${target} PRIVATE ${BGEN_C_WARNING_FLAGS})
   target_compile_definitions(
     ${target} PRIVATE $<$<BOOL:${WIN32}>:_CRT_SECURE_NO_WARNINGS>)
   target_compile_definitions(
@@ -66,3 +66,25 @@ bgen_copy(random.bgen)
 bgen_copy(random.bgen.metafile)
 
 bgen_copy(roundtrip1.bgen)
+
+# --- S3 integration test (only when S3 support is compiled in) ---
+if(BGEN_ENABLE_S3)
+  add_executable(test_s3_open src/s3_open.c)
+  target_link_libraries(test_s3_open PRIVATE BGEN::bgen)
+  target_compile_options(test_s3_open PRIVATE
+    $<$<COMPILE_LANGUAGE:C>:${BGEN_C_WARNING_FLAGS}>)
+  target_compile_definitions(test_s3_open PUBLIC
+    "TEST_DATADIR=\"${CMAKE_CURRENT_BINARY_DIR}/data/\"")
+
+  add_test(NAME s3_open COMMAND test_s3_open)
+  set_tests_properties(s3_open PROPERTIES
+    ENVIRONMENT "BGEN_TEST_S3_URI=$ENV{BGEN_TEST_S3_URI}")
+
+  # Credential-chain unit test (no network required)
+  add_executable(test_credentials_file src/credentials_file.c)
+  target_link_libraries(test_credentials_file PRIVATE BGEN::bgen)
+  target_compile_options(test_credentials_file PRIVATE
+    $<$<COMPILE_LANGUAGE:C>:${BGEN_C_WARNING_FLAGS}>)
+  target_compile_definitions(test_credentials_file PRIVATE BGEN_S3_SUPPORT)
+  add_test(NAME credentials_file COMMAND test_credentials_file)
+endif()

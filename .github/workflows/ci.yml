@@ -59,3 +59,85 @@ jobs:
 
       - name: Build and test Python
         run: pixi run -e test test-python
+
+  test-s3:
+    name: "S3 integration (MinIO)"
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - uses: prefix-dev/setup-pixi@v0.9.6
+        with:
+          environments: test
+
+      - name: Start MinIO server
+        run: |
+          docker run -d --name minio-ci \
+            -p 19000:9000 \
+            -e MINIO_ROOT_USER=minio_access \
+            -e MINIO_ROOT_PASSWORD=minio_secret \
+            minio/minio server /data
+          # Wait for MinIO
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:19000/minio/health/live && break
+            sleep 1
+          done
+
+      - name: Upload test data to MinIO
+        env:
+          AWS_ACCESS_KEY_ID: minio_access
+          AWS_SECRET_ACCESS_KEY: minio_secret
+          AWS_DEFAULT_REGION: us-east-1
+          AWS_ENDPOINT_URL: http://127.0.0.1:19000
+        run: |
+          pip install awscli --quiet
+          aws s3 mb s3://bgen-test --endpoint-url "$AWS_ENDPOINT_URL"
+          aws s3 cp test/data/example.14bits.bgen s3://bgen-test/example.14bits.bgen \
+            --endpoint-url "$AWS_ENDPOINT_URL"
+          # Public bucket for no-sign test
+          aws s3 mb s3://bgen-public --endpoint-url "$AWS_ENDPOINT_URL"
+          aws s3api put-bucket-policy --bucket bgen-public \
+            --policy '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":"*","Action":"s3:GetObject","Resource":"arn:aws:s3:::bgen-public/*"}]}' \
+            --endpoint-url "$AWS_ENDPOINT_URL"
+          aws s3 cp test/data/example.14bits.bgen s3://bgen-public/example.14bits.bgen \
+            --endpoint-url "$AWS_ENDPOINT_URL"
+
+      - name: Configure & build (S3 enabled)
+        run: |
+          pixi run cmake --preset pixi \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DBGEN_BUILD_TESTS=ON \
+            -DBGEN_ENABLE_S3=ON
+          pixi run cmake --build build
+
+      - name: Run C S3 tests
+        env:
+          AWS_ACCESS_KEY_ID: minio_access
+          AWS_SECRET_ACCESS_KEY: minio_secret
+          AWS_DEFAULT_REGION: us-east-1
+          AWS_ENDPOINT_URL: http://127.0.0.1:19000
+          BGEN_TEST_S3_URI: s3://bgen-test/example.14bits.bgen
+          BGEN_TEST_S3_METAFILE: ${{ github.workspace }}/test/data/example.14bits.bgen.metafile
+        run: pixi run ./build/test/test_s3_open
+
+      - name: Run C S3 test (no-sign / public bucket)
+        env:
+          AWS_NO_SIGN_REQUEST: "1"
+          AWS_ENDPOINT_URL: http://127.0.0.1:19000
+          BGEN_TEST_S3_URI: s3://bgen-public/example.14bits.bgen
+          BGEN_TEST_S3_METAFILE: ${{ github.workspace }}/test/data/example.14bits.bgen.metafile
+        run: pixi run ./build/test/test_s3_open
+
+      - name: Install Python package with S3
+        run: |
+          pixi run -e test pip install --quiet "universal_pathlib>=0.2" "s3fs>=2024.1"
+          CMAKE_ARGS="-DBGEN_ENABLE_S3=ON" pixi run -e test pip install --no-build-isolation -e .
+
+      - name: Run Python S3/UPath tests
+        env:
+          BGEN_TEST_MINIO_ENDPOINT: http://127.0.0.1:19000
+          BGEN_TEST_MINIO_ACCESS: minio_access
+          BGEN_TEST_MINIO_SECRET: minio_secret
+          BGEN_TEST_S3_METAFILE: ${{ github.workspace }}/test/data/example.14bits.bgen.metafile
+        run: pixi run -e test pytest python/tests/test_s3_upath.py -v

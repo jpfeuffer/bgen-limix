@@ -16,21 +16,68 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 option(BGEN_BUILD_TESTS "Build C tests" ON)
 option(BGEN_BUILD_PYTHON "Build Python bindings" OFF)
 option(BGEN_ENABLE_SANITIZERS "Enable sanitizers (Debug builds)" OFF)
+option(BGEN_ENABLE_S3 "Enable S3 streaming support (requires libcurl, OpenSSL)" ON)
 option(BGEN_USE_SYSTEM_ZLIB_NG "Use system-provided zlib-ng (native API)" ON)
 option(BGEN_USE_SYSTEM_ZSTD "Use system-provided zstd" ON)
 option(BGEN_USE_SYSTEM_ATHR "Use system-provided athr (almosthere)" ON)
 
-# --- Conda/Pixi prefix detection ---
-if(DEFINED ENV{CONDA_PREFIX})
-  list(APPEND CMAKE_PREFIX_PATH "$ENV{CONDA_PREFIX}")
-  if(WIN32)
-    list(APPEND CMAKE_PREFIX_PATH "$ENV{CONDA_PREFIX}/Library")
-  endif()
-  message(STATUS "Detected CONDA_PREFIX=$ENV{CONDA_PREFIX}")
-  message(STATUS "CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}")
-endif()
+
+option(BGEN_USE_SYSTEM_CURL "Use system-provided libcurl" ON)
 
 include(FetchContent)
+
+# --- S3 support (libcurl for HTTP Range streaming) ---
+if(BGEN_ENABLE_S3)
+  set(CMAKE_CXX_STANDARD 23)
+  set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+  if(BGEN_USE_SYSTEM_CURL)
+    find_package(CURL REQUIRED)
+    set(_bgen_curl CURL::libcurl)
+  else()
+    message(STATUS "Fetching curl via FetchContent ...")
+    set(BUILD_CURL_EXE OFF CACHE BOOL "" FORCE)
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+    set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+    # TLS backend: use native where possible, OpenSSL on Linux
+    if(APPLE)
+      set(CURL_USE_SECTRANSP ON CACHE BOOL "" FORCE)
+      set(CURL_USE_OPENSSL OFF CACHE BOOL "" FORCE)
+    elseif(WIN32)
+      set(CURL_USE_SCHANNEL ON CACHE BOOL "" FORCE)
+      set(CURL_USE_OPENSSL OFF CACHE BOOL "" FORCE)
+    else()
+      # Linux: OpenSSL (available in manylinux images)
+      set(CURL_USE_OPENSSL ON CACHE BOOL "" FORCE)
+    endif()
+    set(HTTP_ONLY ON CACHE BOOL "" FORCE)
+    set(CURL_DISABLE_LDAP ON CACHE BOOL "" FORCE)
+    set(CURL_DISABLE_LDAPS ON CACHE BOOL "" FORCE)
+    set(CURL_DISABLE_FTP ON CACHE BOOL "" FORCE)
+    set(CURL_DISABLE_TELNET ON CACHE BOOL "" FORCE)
+    set(CURL_DISABLE_DICT ON CACHE BOOL "" FORCE)
+    set(CURL_DISABLE_TFTP ON CACHE BOOL "" FORCE)
+    set(CURL_DISABLE_POP3 ON CACHE BOOL "" FORCE)
+    set(CURL_DISABLE_IMAP ON CACHE BOOL "" FORCE)
+    set(CURL_DISABLE_SMB ON CACHE BOOL "" FORCE)
+    set(CURL_DISABLE_SMTP ON CACHE BOOL "" FORCE)
+    set(CURL_DISABLE_GOPHER ON CACHE BOOL "" FORCE)
+    set(CURL_DISABLE_MQTT ON CACHE BOOL "" FORCE)
+    set(CURL_DISABLE_RTSP ON CACHE BOOL "" FORCE)
+    set(CURL_USE_LIBPSL OFF CACHE BOOL "" FORCE)
+    set(CURL_USE_LIBSSH2 OFF CACHE BOOL "" FORCE)
+    set(USE_LIBIDN2 OFF CACHE BOOL "" FORCE)
+    set(CURL_ZLIB OFF CACHE BOOL "" FORCE)
+    set(CURL_BROTLI OFF CACHE BOOL "" FORCE)
+    set(CURL_ZSTD OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(curl
+      GIT_REPOSITORY https://github.com/curl/curl.git
+      GIT_TAG curl-8_12_1
+      GIT_SHALLOW TRUE)
+    FetchContent_MakeAvailable(curl)
+    set(_bgen_curl libcurl_static)
+  endif()
+endif()
 
 # --- zlib-ng (native API) ---
 # In both cases we end up with a variable _bgen_zlibng pointing to the right target:
@@ -107,10 +154,12 @@ endif()
 
 # --- Compiler warnings ---
 if(MSVC)
-  set(BGEN_WARNING_FLAGS /W4)
+  set(BGEN_C_WARNING_FLAGS /W4)
+  set(BGEN_CXX_WARNING_FLAGS /W4)
 else()
-  set(BGEN_WARNING_FLAGS -Wall -Wextra -Wpedantic -Wstrict-prototypes
-                         -Wshadow -Wconversion -Wmissing-prototypes)
+  set(BGEN_C_WARNING_FLAGS -Wall -Wextra -Wpedantic -Wstrict-prototypes
+                           -Wshadow -Wconversion -Wmissing-prototypes)
+  set(BGEN_CXX_WARNING_FLAGS -Wall -Wextra -Wpedantic -Wshadow -Wconversion)
 endif()
 
 # --- Sanitizers ---
@@ -120,8 +169,7 @@ if(BGEN_ENABLE_SANITIZERS AND NOT MSVC)
 endif()
 
 # --- bgen C library ---
-add_library(
-  bgen
+set(_bgen_sources
   src/file.c
   src/genotype.c
   src/io.c
@@ -135,7 +183,10 @@ add_library(
   src/bstring.c
   src/unzlib.c
   src/unzstd.c
-  src/strdup.c)
+  src/strdup.c
+  src/stream.cpp)
+
+add_library(bgen ${_bgen_sources})
 add_library(BGEN::bgen ALIAS bgen)
 
 include(GenerateExportHeader)
@@ -160,7 +211,8 @@ set_target_properties(
 target_compile_definitions(
   bgen PRIVATE
   $<$<BOOL:${WIN32}>:_CRT_SECURE_NO_WARNINGS>
-  $<$<BOOL:${WIN32}>:_CRT_NONSTDC_NO_DEPRECATE>)
+  $<$<BOOL:${WIN32}>:_CRT_NONSTDC_NO_DEPRECATE>
+  $<$<BOOL:${BGEN_ENABLE_S3}>:BGEN_S3_SUPPORT>)
 
 target_link_libraries(bgen PUBLIC ${_bgen_zlibng} ATHR::athr)
 if(TARGET zstd::libzstd_shared)
@@ -169,7 +221,13 @@ elseif(TARGET zstd::libzstd_static)
   target_link_libraries(bgen PUBLIC zstd::libzstd_static)
 endif()
 
-target_compile_options(bgen PRIVATE ${BGEN_WARNING_FLAGS})
+if(BGEN_ENABLE_S3)
+  target_link_libraries(bgen PRIVATE ${_bgen_curl})
+endif()
+
+target_compile_options(bgen PRIVATE
+  $<$<COMPILE_LANGUAGE:C>:${BGEN_C_WARNING_FLAGS}>
+  $<$<COMPILE_LANGUAGE:CXX>:${BGEN_CXX_WARNING_FLAGS}>)
 
 # --- Feature checks ---
 if(NOT c_restrict IN_LIST CMAKE_C_COMPILE_FEATURES)

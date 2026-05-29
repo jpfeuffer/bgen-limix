@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import os
+from typing import Union
+
 from cbgen import example, typing
 from cbgen._compat import bgen_file, bgen_metafile
 from cbgen._core import BgenFile as _BgenFile
 from cbgen._core import BgenMetafile, PartitionResult, VariantInfo
+from cbgen._s3_utils import s3_env_from_storage_options
 from cbgen.example import BGEN_CACHE_HOME
 from cbgen.typing import Genotype, GenotypeResult, Partition, Variants
 
@@ -36,8 +40,9 @@ class BgenFile:
         Path to the BGEN file.
     """
 
-    def __init__(self, filepath: str):
-        self._impl = _BgenFile(filepath)
+    def __init__(self, filepath: Union[str, "os.PathLike[str]"]):
+        with s3_env_from_storage_options(filepath):
+            self._impl = _BgenFile(str(filepath))
 
     @property
     def filepath(self) -> str:

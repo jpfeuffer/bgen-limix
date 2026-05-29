@@ -12,6 +12,7 @@ ninja = ">=1.11"
 zstd = ">=1.5"
 zlib-ng = ">=2.3"
 almosthere = ">=2.0.2,<3"
+libcurl = ">=7.88"
 
 [feature.python.dependencies]
 python = ">=3.10"

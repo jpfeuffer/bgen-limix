@@ -10,6 +10,7 @@
 #include "mem.h"
 #include "report.h"
 #include "samples.h"
+#include "stream.h"
 #include "strdup.h"
 #include <inttypes.h>
 #include <stdbool.h>
@@ -201,7 +202,7 @@ static struct bgen_file* bgen_file_create(char const* filepath)
     bgen->samples_start = 0;
     bgen->variants_start = 0;
 
-    if (!(bgen->stream = fopen(bgen->filepath, "rb"))) {
+    if (!(bgen->stream = bgen_stream_open(bgen->filepath))) {
         bgen_perror("could not open file %s", bgen->filepath);
         bgen_file_close(bgen);
         return NULL;
