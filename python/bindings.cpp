@@ -142,10 +142,16 @@ public:
 
     void create_metafile(const std::string& filepath, bool verbose = false) {
         int32_t nv = nvariants();
-        // Estimate partition count: sqrt(nvariants) clamped to [1, nvariants]
-        uint32_t nparts = static_cast<uint32_t>(std::max(1.0, std::sqrt(static_cast<double>(nv))));
-        if (nparts > static_cast<uint32_t>(nv))
-            nparts = static_cast<uint32_t>(nv);
+        // Estimate partition count using the same formula as cbgen:
+        //   m = max(min(128, nvariants), floor(sqrt(nvariants)))
+        //   nparts = nvariants / m  (at least 1)
+        uint32_t min_variants = 128;
+        uint32_t m = std::max(
+            std::min(min_variants, static_cast<uint32_t>(nv)),
+            static_cast<uint32_t>(std::floor(std::sqrt(static_cast<double>(nv))))
+        );
+        uint32_t nparts = (m > 0) ? static_cast<uint32_t>(nv) / m : 1;
+        if (nparts < 1) nparts = 1;
 
         struct bgen_metafile* mf =
             bgen_metafile_create(handle_.ptr, filepath.c_str(), nparts, verbose ? 1 : 0);
