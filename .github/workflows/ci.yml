@@ -39,6 +39,11 @@ jobs:
       - name: Build
         run: pixi run cmake --build build --config ${{ matrix.build_type }}
 
+      - name: Add pixi DLL directory to PATH (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: echo "$GITHUB_WORKSPACE/.pixi/envs/default/Library/bin" >> "$GITHUB_PATH"
+
       - name: Test
         run: pixi run ctest --test-dir build -C ${{ matrix.build_type }} --output-on-failure
 
