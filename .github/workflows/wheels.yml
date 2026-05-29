@@ -39,6 +39,10 @@ jobs:
     steps:
       - uses: actions/checkout@v6.0.2
 
+      - name: Set up QEMU (for aarch64 Linux builds)
+        if: runner.os == 'Linux'
+        uses: docker/setup-qemu-action@v3
+
       - name: Build wheels
         uses: pypa/cibuildwheel@v3.4.1
         env:
