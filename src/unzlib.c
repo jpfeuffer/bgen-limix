@@ -1,14 +1,13 @@
-#define ZLIB_CONST
 #include "unzlib.h"
 #include "report.h"
-#include "zlib.h"
+#include "zlib-ng.h"
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 
 int bgen_unzlib(char const* src, size_t src_size, char** dst, size_t* dst_size)
 {
-    z_stream strm = {
+    zng_stream strm = {
         .zalloc = Z_NULL,
         .zfree = Z_NULL,
         .opaque = Z_NULL,
@@ -16,60 +15,60 @@ int bgen_unzlib(char const* src, size_t src_size, char** dst, size_t* dst_size)
         .next_in = (unsigned char const*)src,
     };
 
-    int e = inflateInit(&strm);
+    int e = zng_inflateInit(&strm);
 
     if (e != Z_OK) {
-        bgen_error("zlib failed to init (%s)", zError(e));
+        bgen_error("zlib-ng failed to init (%s)", zng_zError(e));
         goto err;
     }
 
     if (src_size > UINT_MAX) {
-        bgen_error("zlib src_size overflow");
+        bgen_error("zlib-ng src_size overflow");
         goto err;
     }
     strm.avail_in = (unsigned)src_size;
 
     if (*dst_size > UINT_MAX) {
-        bgen_error("zlib *dst_size overflow");
+        bgen_error("zlib-ng *dst_size overflow");
         goto err;
     }
     strm.avail_out = (unsigned)*dst_size;
     strm.next_out = (unsigned char*)*dst;
 
-    e = inflate(&strm, Z_FINISH);
+    e = zng_inflate(&strm, Z_FINISH);
     if (e != Z_STREAM_END) {
-        bgen_error("zlib failed to inflate (%s)", zError(e));
+        bgen_error("zlib-ng failed to inflate (%s)", zng_zError(e));
         goto err;
     }
 
-    if (inflateEnd(&strm) != Z_OK) {
-        bgen_error("zlib failed to inflateEnd (%s)", zError(e));
+    if (zng_inflateEnd(&strm) != Z_OK) {
+        bgen_error("zlib-ng failed to inflateEnd (%s)", zng_zError(e));
         return 1;
     }
     return 0;
 
 err:
-    inflateEnd(&strm);
+    zng_inflateEnd(&strm);
     return 1;
 }
 
 int bgen_unzlib_chunked(char const* src, size_t src_size, char** dst, size_t* dst_size)
 {
     if (*dst_size > UINT_MAX) {
-        bgen_error("zlib *dst_size overflow");
+        bgen_error("zlib-ng *dst_size overflow");
         return 1;
     }
 
     unsigned       unused = (unsigned)*dst_size;
     unsigned char* cdst = (unsigned char*)*dst;
 
-    z_stream strm = {
+    zng_stream strm = {
         .zalloc = Z_NULL, .zfree = Z_NULL, .opaque = Z_NULL, .avail_in = 0, .next_in = Z_NULL};
 
-    int ret = inflateInit(&strm);
+    int ret = zng_inflateInit(&strm);
 
     if (ret != Z_OK) {
-        bgen_error("zlib failed to uncompress (%s)", zError(ret));
+        bgen_error("zlib-ng failed to uncompress (%s)", zng_zError(ret));
         goto err;
     }
 
@@ -80,7 +79,7 @@ int bgen_unzlib_chunked(char const* src, size_t src_size, char** dst, size_t* ds
         strm.avail_out = unused;
         strm.next_out = cdst;
 
-        ret = inflate(&strm, Z_NO_FLUSH);
+        ret = zng_inflate(&strm, Z_NO_FLUSH);
 
         if (ret == Z_NEED_DICT) {
             ret = Z_DATA_ERROR;
@@ -103,7 +102,7 @@ int bgen_unzlib_chunked(char const* src, size_t src_size, char** dst, size_t* ds
 
         if (strm.avail_out == 0) {
             if (unused > 0) {
-                bgen_error("zlib failed to uncompress (unknown error)");
+                bgen_error("zlib-ng failed to uncompress (unknown error)");
                 goto err;
             }
 
@@ -114,10 +113,10 @@ int bgen_unzlib_chunked(char const* src, size_t src_size, char** dst, size_t* ds
         }
     }
 
-    inflateEnd(&strm);
+    zng_inflateEnd(&strm);
     return 0;
 
 err:
-    inflateEnd(&strm);
+    zng_inflateEnd(&strm);
     return 1;
 }

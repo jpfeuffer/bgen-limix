@@ -16,7 +16,6 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 option(BGEN_BUILD_TESTS "Build C tests" ON)
 option(BGEN_BUILD_PYTHON "Build Python bindings" OFF)
 option(BGEN_ENABLE_SANITIZERS "Enable sanitizers (Debug builds)" OFF)
-option(BGEN_USE_SYSTEM_ZLIB "Use system-provided zlib" ON)
 option(BGEN_USE_SYSTEM_ZSTD "Use system-provided zstd" ON)
 option(BGEN_USE_SYSTEM_ATHR "Use system-provided athr (almosthere)" ON)
 
@@ -32,27 +31,8 @@ endif()
 
 include(FetchContent)
 
-# --- ZLIB ---
-if(BGEN_USE_SYSTEM_ZLIB)
-  find_package(ZLIB REQUIRED)
-else()
-  message(STATUS "Fetching zlib-ng via FetchContent ...")
-  set(ZLIB_COMPAT ON CACHE BOOL "" FORCE)
-  set(ZLIB_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
-  set(ZLIBNG_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
-  set(WITH_GTEST OFF CACHE BOOL "" FORCE)
-  FetchContent_Declare(zlib-ng
-    GIT_REPOSITORY https://github.com/zlib-ng/zlib-ng.git
-    GIT_TAG 2.3.3
-    GIT_SHALLOW TRUE)
-  FetchContent_MakeAvailable(zlib-ng)
-  get_target_property(_zlib_real zlibstatic ALIASED_TARGET)
-  if(_zlib_real)
-    add_library(ZLIB::ZLIB ALIAS ${_zlib_real})
-  else()
-    add_library(ZLIB::ZLIB ALIAS zlibstatic)
-  endif()
-endif()
+# --- zlib-ng (native API) ---
+find_package(zlib-ng REQUIRED)
 
 # --- zstd ---
 if(BGEN_USE_SYSTEM_ZSTD)
@@ -159,7 +139,7 @@ target_compile_definitions(
   $<$<BOOL:${WIN32}>:_CRT_SECURE_NO_WARNINGS>
   $<$<BOOL:${WIN32}>:_CRT_NONSTDC_NO_DEPRECATE>)
 
-target_link_libraries(bgen PUBLIC ZLIB::ZLIB ATHR::athr)
+target_link_libraries(bgen PUBLIC zlib-ng::zlib-ng ATHR::athr)
 if(TARGET zstd::libzstd_shared)
   target_link_libraries(bgen PUBLIC zstd::libzstd_shared)
 elseif(TARGET zstd::libzstd_static)
