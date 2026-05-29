@@ -10,7 +10,38 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
+
+#ifdef _WIN32
+#  include <windows.h>
+#  include <io.h>
+#  include <fcntl.h>
+/* Portability shims for POSIX env/file helpers on Windows. */
+static int bgen_setenv(const char* name, const char* value)
+{
+    return _putenv_s(name, value) == 0 ? 0 : -1;
+}
+static int bgen_unsetenv(const char* name)
+{
+    return _putenv_s(name, "") == 0 ? 0 : -1;
+}
+static int bgen_mkstemp(char* buf, size_t bufsz)
+{
+    char dir[MAX_PATH];
+    char path[MAX_PATH];
+    if (!GetTempPathA(MAX_PATH, dir)) return -1;
+    if (!GetTempFileNameA(dir, "bgn", 0, path)) return -1;
+    if (strlen(path) + 1 > bufsz) return -1;
+    memcpy(buf, path, strlen(path) + 1);
+    return _open(path, _O_RDWR | _O_BINARY | _O_CREAT | _O_TRUNC,
+                 _S_IREAD | _S_IWRITE);
+}
+#  define setenv(n, v, o) bgen_setenv((n), (v))
+#  define unsetenv(n)     bgen_unsetenv((n))
+#  define close(fd)       _close((fd))
+#  define unlink(p)       _unlink((p))
+#else
+#  include <unistd.h>
+#endif
 
 /* Forward declaration — symbol is provided by libbgen when S3 is enabled. */
 extern int bgen_test_resolve_credentials(char* access, size_t access_len,
@@ -61,8 +92,14 @@ int main(void)
     unsetenv("AWS_CONTAINER_CREDENTIALS_FULL_URI");
 
     /* ── Write a temp credentials file ─────────────────────────────────── */
+#ifdef _WIN32
+    char tmppath[MAX_PATH];
+    int  fd = bgen_mkstemp(tmppath, sizeof tmppath);
+#else
     char tmppath[] = "/tmp/bgen_test_creds_XXXXXX";
     int  fd = mkstemp(tmppath);
+#endif
+    if (fd < 0) { fprintf(stderr, "cannot create temp file\n"); return 1; }
     close(fd);
     write_creds_file(tmppath);
     setenv("AWS_SHARED_CREDENTIALS_FILE", tmppath, 1);
