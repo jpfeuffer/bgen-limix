@@ -16,6 +16,7 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 option(BGEN_BUILD_TESTS "Build C tests" ON)
 option(BGEN_BUILD_PYTHON "Build Python bindings" OFF)
 option(BGEN_ENABLE_SANITIZERS "Enable sanitizers (Debug builds)" OFF)
+option(BGEN_USE_SYSTEM_ZLIB_NG "Use system-provided zlib-ng (native API)" ON)
 option(BGEN_USE_SYSTEM_ZSTD "Use system-provided zstd" ON)
 option(BGEN_USE_SYSTEM_ATHR "Use system-provided athr (almosthere)" ON)
 
@@ -32,7 +33,21 @@ endif()
 include(FetchContent)
 
 # --- zlib-ng (native API) ---
-find_package(zlib-ng REQUIRED)
+if(BGEN_USE_SYSTEM_ZLIB_NG)
+  find_package(zlib-ng REQUIRED)
+else()
+  message(STATUS "Fetching zlib-ng via FetchContent ...")
+  set(ZLIB_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
+  set(WITH_GTEST OFF CACHE BOOL "" FORCE)
+  FetchContent_Declare(zlib-ng
+    GIT_REPOSITORY https://github.com/zlib-ng/zlib-ng.git
+    GIT_TAG 2.2.4
+    GIT_SHALLOW TRUE)
+  FetchContent_MakeAvailable(zlib-ng)
+  if(NOT TARGET zlib-ng::zlib-ng)
+    add_library(zlib-ng::zlib-ng ALIAS zlibstatic)
+  endif()
+endif()
 
 # --- zstd ---
 if(BGEN_USE_SYSTEM_ZSTD)

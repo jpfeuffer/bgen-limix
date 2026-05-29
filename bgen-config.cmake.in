@@ -1,7 +1,9 @@
 @PACKAGE_INIT@
 
 include(CMakeFindDependencyMacro)
-find_dependency(zlib-ng)
+if(@BGEN_USE_SYSTEM_ZLIB_NG@)
+  find_dependency(zlib-ng)
+endif()
 if(@BGEN_USE_SYSTEM_ZSTD@)
   find_dependency(zstd)
 endif()
