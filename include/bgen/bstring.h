@@ -79,7 +79,14 @@ static inline bool bgen_string_equal(struct bgen_string a, struct bgen_string b)
  */
 static inline struct bgen_string BGEN_STRING(char const* str)
 {
+#ifdef __cplusplus
+    struct bgen_string s;
+    s.length = strlen(str);
+    s.data = str;
+    return s;
+#else
     return (struct bgen_string){strlen(str), str};
+#endif
 }
 
 #endif

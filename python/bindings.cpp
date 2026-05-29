@@ -6,6 +6,7 @@
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/vector.h>
 
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <stdexcept>

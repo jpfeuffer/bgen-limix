@@ -46,3 +46,4 @@ wheel.packages = ["python/cbgen"]
 
 [tool.pytest.ini_options]
 testpaths = ["python/tests"]
+addopts = "--import-mode=importlib"
