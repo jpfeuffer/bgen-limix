@@ -5,10 +5,7 @@
       "name": "pixi",
       "displayName": "Pixi environment",
       "binaryDir": "${sourceDir}/build",
-      "generator": "Ninja",
-      "cacheVariables": {
-        "CMAKE_PREFIX_PATH": "$env{CONDA_PREFIX};$env{CONDA_PREFIX}/Library"
-      }
+      "generator": "Ninja"
     }
   ]
 }
