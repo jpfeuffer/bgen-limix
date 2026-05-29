@@ -413,10 +413,10 @@ static FILE* s3_create_file(S3Cookie* cookie)
 }
 
 /* --------------------------------------------------------------------------
- * fopencookie (Linux/glibc) callbacks
+ * fopencookie (Linux/glibc and musl) callbacks
  * -------------------------------------------------------------------------- */
 
-#elif defined(__linux__) && defined(__GLIBC__)
+#elif defined(__linux__)
 
 static ssize_t s3_cookie_read(void* cookie_ptr, char* buf, size_t size)
 {
@@ -516,7 +516,7 @@ static FILE* s3_create_file(S3Cookie* cookie)
 }
 
 #else
-#error "S3 streaming requires funopen (macOS/BSD), fopencookie (Linux/glibc), or _WIN32"
+#error "S3 streaming requires funopen (macOS/BSD), fopencookie (Linux), or _WIN32"
 #endif
 
 /* --------------------------------------------------------------------------
