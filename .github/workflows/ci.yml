@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test-c:
+    name: "C library (${{ matrix.os }}, ${{ matrix.build_type }})"
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-14, windows-2022]
+        build_type: [Release, Debug]
+        include:
+          - os: ubuntu-24.04
+            sanitizers: ON
+          - os: macos-14
+            sanitizers: OFF
+          - os: windows-2022
+            sanitizers: OFF
+
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - uses: prefix-dev/setup-pixi@v0.9.6
+
+      - name: Configure CMake
+        run: >
+          pixi run cmake -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+          -DCMAKE_PREFIX_PATH=$CONDA_PREFIX
+          -DBGEN_BUILD_TESTS=ON
+          -DBGEN_BUILD_PYTHON=OFF
+          -DBGEN_ENABLE_SANITIZERS=${{ matrix.sanitizers }}
+
+      - name: Build
+        run: pixi run cmake --build build --config ${{ matrix.build_type }}
+
+      - name: Test
+        run: pixi run ctest --test-dir build -C ${{ matrix.build_type }} --output-on-failure
+
+  test-python:
+    name: "Python (${{ matrix.os }})"
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-14, windows-2022]
+
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - uses: prefix-dev/setup-pixi@v0.9.6
+        with:
+          environments: test
+
+      - name: Build and test Python
+        run: pixi run -e test test-python

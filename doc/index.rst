@@ -27,5 +27,5 @@ Comments and bugs
 
 Please, report any issue by `opening an issue`_ on our `github page`_.
 
-.. _opening an issue: https://github.com/limix/bgen/issues/new
-.. _github page: https://github.com/limix/bgen
+.. _opening an issue: https://github.com/jpfeuffer/bgen-limix/issues/new
+.. _github page: https://github.com/jpfeuffer/bgen-limix

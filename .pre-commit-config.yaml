@@ -1,18 +1,30 @@
 ---
 repos:
-  - repo: git://github.com/pre-commit/pre-commit-hooks
-    rev: v4.3.0
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
     hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
       - id: check-yaml
-  - repo: git://github.com/pre-commit/mirrors-prettier
-    rev: v2.7.1
+      - id: check-toml
+      - id: check-merge-conflict
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.15
     hooks:
-      - id: prettier
-  - repo: git://github.com/doublify/pre-commit-clang-format
-    rev: 62302476d0da01515660132d76902359bed0f782
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+  - repo: https://github.com/pre-commit/mirrors-clang-format
+    rev: v22.1.5
     hooks:
       - id: clang-format
+        types_or: [c, c++]
   - repo: https://github.com/cheshirekow/cmake-format-precommit
     rev: v0.6.13
     hooks:
       - id: cmake-format
+  - repo: https://github.com/rbubley/mirrors-prettier
+    rev: v3.8.3
+    hooks:
+      - id: prettier
+        types_or: [yaml, markdown]

@@ -1,0 +1,48 @@
+[build-system]
+requires = ["scikit-build-core>=0.10", "nanobind>=2.0"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "cbgen"
+version = "4.2.0"
+description = "Python wrapper around the BGEN C library"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+authors = [
+    { name = "Danilo Horta", email = "danilo.horta@pm.me" },
+    { name = "Julianus Pfeuffer" },
+]
+keywords = ["bgen", "reader", "genetics", "bioinformatics"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: C",
+    "Programming Language :: C++",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+dependencies = [
+    "numpy>=2.0",
+    "pooch>=1.6",
+]
+
+[project.urls]
+Homepage = "https://github.com/jpfeuffer/bgen-limix"
+Repository = "https://github.com/jpfeuffer/bgen-limix"
+Issues = "https://github.com/jpfeuffer/bgen-limix/issues"
+
+[project.optional-dependencies]
+test = ["pytest>=7"]
+
+[tool.scikit-build]
+cmake.build-type = "Release"
+cmake.args = [
+  "-DBGEN_BUILD_TESTS=OFF",
+  "-DBGEN_BUILD_PYTHON=ON",
+  "-DBGEN_USE_SYSTEM_ZLIB=OFF",
+  "-DBGEN_USE_SYSTEM_ZSTD=OFF",
+  "-DBGEN_USE_SYSTEM_ATHR=OFF",
+]
+wheel.packages = ["python/cbgen"]
+
+[tool.pytest.ini_options]
+testpaths = ["python/tests"]

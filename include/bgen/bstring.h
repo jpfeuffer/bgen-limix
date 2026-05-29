@@ -27,7 +27,7 @@ struct bgen_string
  */
 static inline struct bgen_string const* bgen_string_create(char const* data, size_t length)
 {
-    struct bgen_string* str = malloc(sizeof(struct bgen_string));
+    struct bgen_string* str = (struct bgen_string*)malloc(sizeof(struct bgen_string));
     str->data = data;
     str->length = length;
     return str;
@@ -39,8 +39,8 @@ static inline struct bgen_string const* bgen_string_create(char const* data, siz
 static inline void bgen_string_destroy(struct bgen_string const* bgen_string)
 {
     if (bgen_string->length > 0)
-        free((char*)bgen_string->data);
-    free((struct bgen_string*)bgen_string);
+        free((void*)bgen_string->data);
+    free((void*)bgen_string);
 }
 /** Get a pointer to the C string.
  *

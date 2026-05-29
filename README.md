@@ -1,57 +1,79 @@
 # bgen
 
-A [BGEN file format](http://www.well.ox.ac.uk/~gav/bgen_format/) reader.
+C library and Python bindings for reading [BGEN files](https://www.well.ox.ac.uk/~gav/bgen_format/) (format specifications 1.2 and 1.3).
 
-It fully supports the BGEN format specifications 1.2 and 1.3.
+## Features
 
-## Install
+- Fast C library for parsing BGEN genotype files
+- Python bindings via [nanobind](https://github.com/wjakob/nanobind)
+- Supports BGEN 1.2 and 1.3 format specifications
+- zlib and zstd decompression support
+- Metafile indexing for efficient random access
 
-You can install it via `conda`:
-
-```bash
-conda install -c conda-forge bgen
-```
-
-A second installation option would be to download the latest source and to build it by yourself.
-It can be as simple as:
+## Quick start (pixi)
 
 ```bash
-curl -fsSL https://git.io/JerYI | GITHUB_USER=limix GITHUB_PROJECT=bgen bash
+pixi install
+pixi run test
 ```
 
-Under Windows, please, use Git Bash terminal to enter the above command.
-
-## Documentation
-
-Refer to [documentation](https://bgen.readthedocs.io/) for usage and API description.
-
-## File specification
-
-The original specification can be found at [http://www.well.ox.ac.uk/~gav/bgen_format/](http://www.well.ox.ac.uk/~gav/bgen_format/).
-We have also created an alternative, more [user-friendly BGEN specification](bgen-file-format.pdf).
-
-## Development
-
-Make sure you have the dependencies installed.
-From terminal, clone the repository and checkout the develop branch:
+## Building the C library
 
 ```bash
-git clone https://github.com/limix/bgen.git
-cd bgen
+cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+ctest --test-dir build --output-on-failure
 ```
 
-Create a build folder and compile from there:
+System dependencies: `zlib`, `zstd` (installed via your system package manager or conda).
+
+## Installing the Python package
 
 ```bash
-mkdir build
-cd build
-# Configure and generate scripts that will build it
-cmake -DCMAKE_BUILD_TYPE=Release ..
-# Compile it
-cmake --build . --config Release
-# Test it
-ctest --output-on-failure -C Release
+pip install .
 ```
+
+Or in development mode:
+
+```bash
+pip install -e ".[test]"
+pytest python/tests
+```
+
+## Python usage
+
+```python
+from cbgen import BgenFile, BgenMetafile
+
+# Open a BGEN file
+with BgenFile("example.bgen") as bgen:
+    print(f"Variants: {bgen.nvariants}, Samples: {bgen.nsamples}")
+
+    if bgen.contain_samples:
+        samples = bgen.read_samples()
+
+    # Create a metafile index for efficient access
+    bgen.create_metafile("example.bgen.metafile")
+
+# Read variant data via metafile
+with BgenFile("example.bgen") as bgen:
+    with BgenMetafile("example.bgen.metafile") as mf:
+        partition = mf.read_partition(0)
+        for variant in partition.variants:
+            gt = bgen.read_genotype(variant.offset)
+            print(f"{variant.rsid}: {gt.probability.shape}")
+```
+
+## C API
+
+Link against the `bgen` library:
+
+```cmake
+find_package(bgen REQUIRED)
+target_link_libraries(mytarget PRIVATE BGEN::bgen)
+```
+
+See `include/bgen/bgen.h` for the full C API.
 
 ## Acknowledgments
 
@@ -62,7 +84,8 @@ ctest --output-on-failure -C Release
 ## Authors
 
 - [Danilo Horta](https://github.com/horta)
+- [Julianus Pfeuffer](https://github.com/jpfeuffer)
 
 ## License
 
-This project is licensed under the [MIT License](https://raw.githubusercontent.com/limix/bgen/main/LICENSE.md).
+This project is licensed under the [MIT License](https://raw.githubusercontent.com/jpfeuffer/bgen-limix/main/LICENSE.md).

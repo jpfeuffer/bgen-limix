@@ -5,7 +5,20 @@ compile_commands.json
 
 .tags*
 
-build/
+build*/
+
+# pixi
+.pixi/
+pixi.lock
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+*.so
+*.pyd
+.pytest_cache/
 
 # Object files
 *.o

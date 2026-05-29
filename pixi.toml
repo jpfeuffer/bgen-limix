@@ -1,0 +1,42 @@
+[workspace]
+name = "bgen"
+version = "4.2.0"
+description = "C library and Python bindings for the BGEN format (specifications 1.2 and 1.3)"
+channels = ["conda-forge"]
+platforms = ["linux-64", "osx-64", "osx-arm64", "win-64"]
+license = "MIT"
+
+[dependencies]
+cmake = ">=4.3"
+ninja = ">=1.11"
+zstd = ">=1.5"
+zlib-ng = ">=2.3"
+almosthere = ">=2.0.2,<3"
+
+[feature.python.dependencies]
+python = ">=3.10"
+numpy = ">=2.0"
+nanobind = ">=2.0"
+scikit-build-core = ">=0.10"
+pip = "*"
+
+[feature.test.dependencies]
+pytest = ">=7"
+pooch = ">=1.6"
+
+[feature.dev.dependencies]
+pre-commit = "*"
+ruff = "*"
+
+[environments]
+default = { features = ["python", "test", "dev"], solve-group = "default" }
+build = { features = ["python"], solve-group = "default" }
+test = { features = ["python", "test"], solve-group = "default" }
+
+[tasks]
+configure = "cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=$CONDA_PREFIX"
+build-c = { cmd = "cmake --build build", depends-on = ["configure"] }
+test-c = { cmd = "ctest --test-dir build --output-on-failure", depends-on = ["build-c"] }
+build-python = "pip install --no-build-isolation -e ."
+test-python = { cmd = "pytest python/tests", depends-on = ["build-python"] }
+test = { depends-on = ["test-c", "test-python"] }
