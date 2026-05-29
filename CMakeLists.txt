@@ -33,27 +33,28 @@ endif()
 include(FetchContent)
 
 # --- zlib-ng (native API) ---
+# In both cases we end up with a variable _bgen_zlibng pointing to the right target:
+#   find_package: conda-forge exports zlib-ng::zlib (native shared)
+#   FetchContent: zlib-ng creates target "zlib" in both compat and native mode
 if(BGEN_USE_SYSTEM_ZLIB_NG)
   find_package(zlib-ng REQUIRED)
-  # conda-forge and some distros only install the static variant
-  if(NOT TARGET zlib-ng::zlib-ng AND TARGET zlib-ng::zlib-ng-static)
-    add_library(zlib-ng::zlib-ng ALIAS zlib-ng::zlib-ng-static)
+  if(NOT TARGET zlib-ng::zlib)
+    message(FATAL_ERROR "zlib-ng found but target zlib-ng::zlib does not exist. "
+      "Check your zlib-ng-targets.cmake for the actual exported target names.")
   endif()
-  if(NOT TARGET zlib-ng::zlib-ng)
-    message(FATAL_ERROR "zlib-ng found but neither zlib-ng::zlib-ng nor zlib-ng::zlib-ng-static target exists")
-  endif()
+  set(_bgen_zlibng zlib-ng::zlib)
 else()
   message(STATUS "Fetching zlib-ng via FetchContent ...")
   set(ZLIB_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
   set(WITH_GTEST OFF CACHE BOOL "" FORCE)
+  set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
   FetchContent_Declare(zlib-ng
     GIT_REPOSITORY https://github.com/zlib-ng/zlib-ng.git
     GIT_TAG 2.2.4
     GIT_SHALLOW TRUE)
   FetchContent_MakeAvailable(zlib-ng)
-  if(NOT TARGET zlib-ng::zlib-ng)
-    add_library(zlib-ng::zlib-ng ALIAS zlib-ng-static)
-  endif()
+  # zlib-ng always creates a target named "zlib" (static or shared)
+  set(_bgen_zlibng zlib)
 endif()
 
 # --- zstd ---
@@ -161,7 +162,7 @@ target_compile_definitions(
   $<$<BOOL:${WIN32}>:_CRT_SECURE_NO_WARNINGS>
   $<$<BOOL:${WIN32}>:_CRT_NONSTDC_NO_DEPRECATE>)
 
-target_link_libraries(bgen PUBLIC zlib-ng::zlib-ng ATHR::athr)
+target_link_libraries(bgen PUBLIC ${_bgen_zlibng} ATHR::athr)
 if(TARGET zstd::libzstd_shared)
   target_link_libraries(bgen PUBLIC zstd::libzstd_shared)
 elseif(TARGET zstd::libzstd_static)
@@ -197,7 +198,7 @@ include(GNUInstallDirs)
 
 set(_bgen_install_targets bgen)
 if(NOT BGEN_USE_SYSTEM_ZLIB_NG)
-  list(APPEND _bgen_install_targets zlib-ng-static)
+  list(APPEND _bgen_install_targets zlib)
 endif()
 if(NOT BGEN_USE_SYSTEM_ZSTD)
   list(APPEND _bgen_install_targets libzstd_static)
