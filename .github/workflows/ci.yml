@@ -28,9 +28,15 @@ jobs:
 
       - uses: prefix-dev/setup-pixi@v0.9.6
 
+      - name: Debug environment (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          pixi run bash -c 'echo "CONDA_PREFIX=$CONDA_PREFIX"; ls -la "$CONDA_PREFIX/Library/include/" | head -20 || true; ls -la "$CONDA_PREFIX/Library/lib/" | grep -i zlib || true; ls -la "$CONDA_PREFIX/Library/lib/" | grep -i "^z\." || true'
+
       - name: Configure CMake
         run: >
           pixi run cmake --preset pixi
+          --debug-find
           -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
           -DBGEN_BUILD_TESTS=ON
           -DBGEN_BUILD_PYTHON=OFF
