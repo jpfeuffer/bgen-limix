@@ -444,20 +444,27 @@ static ssize_t s3_cookie_read(void* cookie_ptr, char* buf, size_t size)
     return total_read;
 }
 
-static int s3_cookie_seek(void* cookie_ptr, off64_t* offset, int whence)
+/* glibc's fopencookie seek callback uses off64_t*; musl uses off_t*. */
+#ifdef __GLIBC__
+using fopencookie_off_t = off64_t;
+#else
+using fopencookie_off_t = off_t;
+#endif
+
+static int s3_cookie_seek(void* cookie_ptr, fopencookie_off_t* offset, int whence)
 {
     auto* c = static_cast<S3Cookie*>(cookie_ptr);
     int64_t new_pos;
     switch (whence) {
-    case SEEK_SET: new_pos = *offset; break;
-    case SEEK_CUR: new_pos = c->position + *offset; break;
-    case SEEK_END: new_pos = c->file_size + *offset; break;
+    case SEEK_SET: new_pos = static_cast<int64_t>(*offset); break;
+    case SEEK_CUR: new_pos = c->position + static_cast<int64_t>(*offset); break;
+    case SEEK_END: new_pos = c->file_size + static_cast<int64_t>(*offset); break;
     default: return -1;
     }
     if (new_pos < 0) return -1;
     c->position = new_pos;
     c->eof_flag = false;
-    *offset = new_pos;
+    *offset = static_cast<fopencookie_off_t>(new_pos);
     return 0;
 }
 
