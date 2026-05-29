@@ -32,8 +32,7 @@ static int bgen_mkstemp(char* buf, size_t bufsz)
     if (!GetTempFileNameA(dir, "bgn", 0, path)) return -1;
     if (strlen(path) + 1 > bufsz) return -1;
     memcpy(buf, path, strlen(path) + 1);
-    return _open(path, _O_RDWR | _O_BINARY | _O_CREAT | _O_TRUNC,
-                 _S_IREAD | _S_IWRITE);
+    return _open(path, _O_RDWR | _O_BINARY | _O_CREAT | _O_TRUNC, 0600);
 }
 #  define setenv(n, v, o) bgen_setenv((n), (v))
 #  define unsetenv(n)     bgen_unsetenv((n))

@@ -477,28 +477,13 @@ static FILE* s3_create_file(S3Cookie* cookie)
 
 #elif defined(_WIN32)
 
-#include <windows.h>
-#include <io.h>
-#include <fcntl.h>
-
 /* Windows has neither funopen nor fopencookie.  Download the whole S3 object
- * to a temporary file and return a seekable FILE* backed by it.  The temp
- * file is opened with FILE_FLAG_DELETE_ON_CLOSE so it is removed when the
- * returned FILE* is closed. */
+ * into a tmpfile() and return the seekable, auto-deleted FILE*. */
 static FILE* s3_create_file(S3Cookie* cookie)
 {
-    char tmpdir[MAX_PATH];
-    char tmppath[MAX_PATH];
-    if (!GetTempPathA(MAX_PATH, tmpdir) ||
-        !GetTempFileNameA(tmpdir, "bgn", 0, tmppath)) {
-        fprintf(stderr, "bgen: failed to obtain temp path for S3 stream\n");
-        return nullptr;
-    }
-
-    FILE* tmp = fopen(tmppath, "w+b");
+    FILE* tmp = tmpfile();
     if (!tmp) {
-        fprintf(stderr, "bgen: failed to open temp file for S3 stream\n");
-        _unlink(tmppath);
+        fprintf(stderr, "bgen: tmpfile() failed for S3 stream\n");
         return nullptr;
     }
 
@@ -509,7 +494,6 @@ static FILE* s3_create_file(S3Cookie* cookie)
         std::vector<char> data;
         if (s3_range_read(cookie, pos, end, data) != 0) {
             fclose(tmp);
-            _unlink(tmppath);
             return nullptr; /* caller owns cookie cleanup on failure */
         }
         if (!data.empty())
@@ -523,26 +507,8 @@ static FILE* s3_create_file(S3Cookie* cookie)
     curl_slist_free_all(cookie->extra_headers);
     delete cookie;
 
-    fflush(tmp);
-    fclose(tmp);
-
-    /* Reopen with FILE_FLAG_DELETE_ON_CLOSE so the file disappears on close. */
-    HANDLE h = CreateFileA(tmppath, GENERIC_READ,
-                           FILE_SHARE_READ | FILE_SHARE_DELETE,
-                           nullptr, OPEN_EXISTING,
-                           FILE_FLAG_DELETE_ON_CLOSE, nullptr);
-    if (h == INVALID_HANDLE_VALUE) {
-        _unlink(tmppath);
-        return nullptr;
-    }
-    int fd = _open_osfhandle(reinterpret_cast<intptr_t>(h),
-                             _O_RDONLY | _O_BINARY);
-    if (fd < 0) {
-        CloseHandle(h);
-        _unlink(tmppath);
-        return nullptr;
-    }
-    return _fdopen(fd, "rb");
+    rewind(tmp);
+    return tmp;
 }
 
 #else
