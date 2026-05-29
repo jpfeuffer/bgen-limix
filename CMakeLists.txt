@@ -153,6 +153,14 @@ else()
     GIT_SHALLOW TRUE)
   FetchContent_MakeAvailable(almosthere)
   # ATHR::athr alias is defined by almosthere's CMakeLists.txt
+  # PTHREAD_MUTEX_TIMED_NP is a GNU non-portable extension. almosthere v2.0.2
+  # compiles with strict POSIX flags (-D_POSIX_C_SOURCE -D_XOPEN_SOURCE) that
+  # suppress it on some Linux/aarch64 toolchains (e.g. manylinux with Python 3.14).
+  # Setting C11THREADS_NO_TIMED_MUTEX makes c11threads.h define it as
+  # PTHREAD_MUTEX_NORMAL, which is portable and semantically identical.
+  if(UNIX AND NOT APPLE)
+    target_compile_definitions(athr PRIVATE C11THREADS_NO_TIMED_MUTEX)
+  endif()
 endif()
 
 # --- Compiler warnings ---
