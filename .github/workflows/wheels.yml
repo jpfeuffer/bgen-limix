@@ -58,8 +58,8 @@ jobs:
       - name: Build wheels
         uses: pypa/cibuildwheel@v3.4.1
         env:
-          # Build for CPython 3.11–3.14
-          CIBW_BUILD: "cp311-* cp312-* cp313-* cp314-*"
+          # Build for CPython 3.11 only — stable ABI (abi3) wheel works for all 3.11+
+          CIBW_BUILD: "cp311-*"
           CIBW_SKIP: "*-musllinux_i686"
           # Test the built wheels
           CIBW_TEST_REQUIRES: pytest
