@@ -44,7 +44,7 @@ Important nuance for this repo:
 
 ## 3) Expected runtime cost for this specific library
 
-## Which operations are slower under `Py_LIMITED_API` here?
+### Which operations are slower under `Py_LIMITED_API` here?
 
 Likely slower (small absolute cost):
 1. **Python object/binding boundary operations**
@@ -60,7 +60,7 @@ Likely unchanged in dominant runtime:
 - C++ loops writing ploidy/missing arrays
 - overall memory traffic for large genotype matrices
 
-## Estimated impact ranges (for this codebase)
+### Estimated impact ranges (for this codebase)
 
 Given the implementation shape above, expected impact is:
 
