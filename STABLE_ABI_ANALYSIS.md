@@ -1,7 +1,7 @@
 # Stable ABI (abi3) analysis for `bgen-limix`
 
 ## Scope
-This report analyzes likely runtime impact of enabling nanobind stable ABI (`Py_LIMITED_API`) for this repository, based on the current implementation and PR #3 (`feat: nanobind stable ABI (abi3) wheels`).
+This report analyzes likely runtime impact of enabling nanobind stable ABI (`Py_LIMITED_API`) for this repository, based on the current implementation and [PR #3](https://github.com/jpfeuffer/bgen-limix/pull/3) (`feat: nanobind stable ABI (abi3) wheels`).
 
 ## 1) Current nanobind / NumPy usage in this codebase
 
@@ -110,7 +110,7 @@ Caveat:
 ## Baseline validation notes from this investigation
 
 - `pytest python/tests` passes locally (`6 passed, 4 skipped`).
-- Full C test path via `cmake -B build ...` was not completed in this environment because `libcurl` is not installed.
+- **Limitation:** full C test path via `cmake -B build ...` was not completed in this environment because `libcurl` is not installed.
 - GitHub workflow view for PR #3 branch showed:
   - `CI`: success
   - `Build wheels`: in progress (at inspection time)
