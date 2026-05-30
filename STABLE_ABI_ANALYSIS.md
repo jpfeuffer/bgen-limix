@@ -110,7 +110,7 @@ Caveat:
 ## Baseline validation notes from this investigation
 
 - `pytest python/tests` passes locally (`6 passed, 4 skipped`).
-- Full C test path via `cmake -B build ...` failed in this environment due to missing system `CURL` dependency (environment issue, not due to report changes).
+- Full C test path via `cmake -B build ...` failed in this environment due to missing system `libcurl` dependency (environment issue, not due to report changes).
 - GitHub workflow view for PR #3 branch showed:
   - `CI`: success
   - `Build wheels`: in progress (at inspection time)
