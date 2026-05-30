@@ -36,6 +36,7 @@ test = ["pytest>=7"]
 [tool.scikit-build]
 cmake.build-type = "Release"
 build-dir = "build-python"
+wheel.py-api = "cp311"
 cmake.args = [
   "-DBGEN_BUILD_TESTS=OFF",
   "-DBGEN_BUILD_PYTHON=ON",

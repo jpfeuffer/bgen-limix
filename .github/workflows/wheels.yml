@@ -39,10 +39,8 @@ jobs:
         include:
           - os: ubuntu-24.04
             label: ubuntu-24.04-x86_64
-            cibw_archs_linux: x86_64
-          - os: ubuntu-24.04
+          - os: ubuntu-24.04-arm
             label: ubuntu-24.04-aarch64
-            cibw_archs_linux: aarch64
           - os: macos-15
             label: macos-15
           - os: windows-2025
@@ -51,23 +49,17 @@ jobs:
     steps:
       - uses: actions/checkout@v6.0.2
 
-      - name: Set up QEMU (for aarch64 Linux builds)
-        if: matrix.cibw_archs_linux == 'aarch64'
-        uses: docker/setup-qemu-action@v3
-
       - name: Build wheels
         uses: pypa/cibuildwheel@v3.4.1
         env:
-          # Build for CPython 3.11–3.14
-          CIBW_BUILD: "cp311-* cp312-* cp313-* cp314-*"
+          # Build for CPython 3.11 only — stable ABI (abi3) wheel works for all 3.11+
+          CIBW_BUILD: "cp311-*"
           CIBW_SKIP: "*-musllinux_i686"
           # Test the built wheels
           CIBW_TEST_REQUIRES: pytest
           CIBW_TEST_COMMAND: pytest {project}/python/tests -v
           # macOS: build universal2 wheels on the ARM runner
           CIBW_ARCHS_MACOS: "native"
-          # Linux: each matrix entry targets one architecture
-          CIBW_ARCHS_LINUX: ${{ matrix.cibw_archs_linux }}
           # Windows: build AMD64 only
           CIBW_ARCHS_WINDOWS: "AMD64"
           # Install OpenSSL headers needed by fetched curl on Linux
