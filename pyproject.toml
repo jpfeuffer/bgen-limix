@@ -35,16 +35,9 @@ test = ["pytest>=7"]
 
 [tool.scikit-build]
 cmake.build-type = "Release"
+cmake.source-dir = "python"
 build-dir = "build-python"
 wheel.py-api = "cp311"
-cmake.args = [
-  "-DBGEN_BUILD_TESTS=OFF",
-  "-DBGEN_BUILD_PYTHON=ON",
-  "-DBGEN_USE_SYSTEM_ZLIB_NG=OFF",
-  "-DBGEN_USE_SYSTEM_ZSTD=OFF",
-  "-DBGEN_USE_SYSTEM_ATHR=OFF",
-  "-DBGEN_USE_SYSTEM_CURL=OFF",
-]
 wheel.packages = ["python/cbgen"]
 
 [tool.pytest.ini_options]

@@ -14,7 +14,6 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 option(BGEN_BUILD_TESTS "Build C tests" ON)
-option(BGEN_BUILD_PYTHON "Build Python bindings" OFF)
 option(BGEN_ENABLE_SANITIZERS "Enable sanitizers (Debug builds)" OFF)
 option(BGEN_ENABLE_S3 "Enable S3 streaming support (requires libcurl, OpenSSL)" ON)
 option(BGEN_USE_SYSTEM_ZLIB_NG "Use system-provided zlib-ng (native API)" ON)
@@ -321,7 +320,3 @@ if(BGEN_BUILD_TESTS)
   add_subdirectory(test)
 endif()
 
-# --- Python bindings ---
-if(BGEN_BUILD_PYTHON)
-  add_subdirectory(python)
-endif()
