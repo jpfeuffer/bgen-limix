@@ -10,7 +10,8 @@ on:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Only cancel-in-progress if it's NOT a tag push (so automated/manual release pushes don't get canceled by subsequent commits)
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
 
 jobs:
   build_sdist:
