@@ -240,7 +240,7 @@ endif()
 # runtime.  Without this, Git-for-Windows ships older copies of those DLLs
 # earlier in PATH and causes STATUS_ENTRYPOINT_NOT_FOUND (0xC0000139).
 if(MINGW)
-  target_link_options(bgen INTERFACE -static-libstdc++ -static-libgcc)
+  target_link_options(bgen INTERFACE "$<LINK_ONLY:-static-libstdc++>" "$<LINK_ONLY:-static-libgcc>")
 endif()
 
 target_compile_options(bgen PRIVATE
