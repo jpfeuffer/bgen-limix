@@ -8,34 +8,7 @@ project(cbgen LANGUAGES C CXX)
 # self-contained wheel.
 find_package(bgen QUIET)
 
-# Verify compiler compatibility on Windows. If the pre-built library was built
-# with GCC (e.g. MinGW) but the Python bindings are being built with MSVC (or vice
-# versa), we CANNOT link them due to ABI / object format mismatch (LNK1143).
-# In such cases, we discard the pre-built target and fall back to from-source.
-set(_bgen_compat_found FALSE)
 if(TARGET BGEN::bgen)
-  set(_bgen_compat_found TRUE)
-  if(WIN32)
-    # Check imported location file extension or config properties
-    get_target_property(_bgen_loc BGEN::bgen IMPORTED_LOCATION_RELEASE)
-    if(NOT _bgen_loc)
-      get_target_property(_bgen_loc BGEN::bgen IMPORTED_LOCATION)
-    endif()
-    
-    if(_bgen_loc)
-      # GCC uses .a extension on Windows, MSVC uses .lib
-      if(MSVC AND _bgen_loc MATCHES "\\.a$")
-        message(STATUS "cbgen: Discarding pre-built bgen because of compiler mismatch (Pre-built is GCC, but this build is MSVC).")
-        set(_bgen_compat_found FALSE)
-      elseif(NOT MSVC AND _bgen_loc MATCHES "\\.lib$")
-        message(STATUS "cbgen: Discarding pre-built bgen because of compiler mismatch (Pre-built is MSVC, but this build is GCC).")
-        set(_bgen_compat_found FALSE)
-      endif()
-    endif()
-  endif()
-endif()
-
-if(_bgen_compat_found)
   message(STATUS "cbgen: using pre-built bgen (BGEN::bgen target found)")
   # The conda-forge athr package hardcodes Xcode SDK paths in its link
   # interface (e.g. .../MacOSX11.0.sdk/usr/lib/libcurses.tbd). When we reuse a
