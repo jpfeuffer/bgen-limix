@@ -4,7 +4,7 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "cbgen"
-version = "4.2.0"
+version = "4.2.1"
 description = "Python wrapper around the BGEN C library"
 readme = "README.md"
 license = "MIT"
