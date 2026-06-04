@@ -2,6 +2,8 @@
 
 C library and Python bindings for reading [BGEN files](https://www.well.ox.ac.uk/~gav/bgen_format/) (format specifications 1.2 and 1.3).
 
+This repository is a maintained fork of the original limix/bgen and limix/cbgen projects, merged into a single codebase with a modern build system, nanobind-based Python bindings, and S3 support.
+
 ## Features
 
 - Fast C library for parsing BGEN genotype files
