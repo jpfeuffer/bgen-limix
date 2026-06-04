@@ -8,6 +8,7 @@
 #include "unzstd.h"
 #include <inttypes.h>
 #include <math.h>
+#include <string.h>
 
 #define BIT(var, bit) ((var & (1 << bit)) != 0)
 
@@ -15,7 +16,6 @@ static void  read_phased_genotype64(struct bgen_genotype* genotype, double* prob
 static void  read_phased_genotype32(struct bgen_genotype* genotype, float* probs);
 static void  read_unphased_genotype64(struct bgen_genotype* genotype, double* probs);
 static void  read_unphased_genotype32(struct bgen_genotype* genotype, float* probs);
-static char* decompress(struct bgen_file* bgen_file);
 
 static inline uint8_t read_ploidy(uint8_t ploidy_miss) { return ploidy_miss & 127; }
 
@@ -42,34 +42,37 @@ static inline void set_array_nan32(float* p, size_t n)
 int bgen_layout2_read_header(struct bgen_file* bgen_file, struct bgen_genotype* genotype)
 {
     uint32_t nsamples = 0;
-    uint8_t* plo_miss = NULL;
 
     char const* chunk_ptr = NULL;
-    char*       chunk = NULL;
+    char*       chunk     = NULL;
+    bool        chunk_is_scratch = false;
 
     if (bgen_file_compression(bgen_file) > 0) {
-
-        if ((chunk = decompress(bgen_file)) == NULL) {
+        /* Plan A+B: decompress into file's scratch buffer, reusing zlib/zstd context. */
+        size_t sz = 0;
+        if (bgen_file_decompress_block(bgen_file, &chunk, &sz))
             goto err;
-        }
+        chunk_is_scratch = true;
 
         chunk_ptr = chunk;
         bgen_memfread(&nsamples, &chunk_ptr, sizeof(nsamples));
 
     } else {
-
+        /* Uncompressed path: malloc a local buffer (uncommon in practice). */
         if (fread(&nsamples, sizeof(nsamples), 1, bgen_file_stream(bgen_file)) < 1) {
             bgen_perror_eof(bgen_file_stream(bgen_file), "could not read number of samples");
             goto err;
         }
 
         chunk = malloc(6 * nsamples);
+        if (!chunk) { bgen_error("could not malloc uncompressed chunk"); goto err; }
 
         if (fread(chunk, 6 * nsamples, 1, bgen_file_stream(bgen_file)) < 1) {
             bgen_perror_eof(bgen_file_stream(bgen_file), "could not read chunk");
             goto err;
         }
 
+        chunk_is_scratch = false;
         chunk_ptr = chunk;
     }
 
@@ -82,11 +85,9 @@ int bgen_layout2_read_header(struct bgen_file* bgen_file, struct bgen_genotype* 
     genotype->min_ploidy = min_ploidy;
     genotype->max_ploidy = max_ploidy;
 
-    plo_miss = malloc(nsamples * sizeof(uint8_t));
-
-    for (uint32_t i = 0; i < nsamples; ++i) {
-        plo_miss[i] = (uint8_t)chunk_ptr[i];
-    }
+    /* Plan A: use file's ploidy scratch instead of malloc per call. */
+    uint8_t* plo_miss = bgen_file_ploidy_scratch(bgen_file);
+    memcpy(plo_miss, chunk_ptr, nsamples);
     chunk_ptr += nsamples;
 
     uint8_t phased = 0;
@@ -94,11 +95,12 @@ int bgen_layout2_read_header(struct bgen_file* bgen_file, struct bgen_genotype* 
     uint8_t nbits = 0;
     bgen_memfread(&nbits, &chunk_ptr, 1);
 
-    genotype->nsamples = nsamples;
-    genotype->nalleles = nalleles;
-    genotype->phased = phased;
-    genotype->nbits = nbits;
-    genotype->ploidy_missingness = plo_miss;
+    genotype->nsamples            = nsamples;
+    genotype->nalleles            = nalleles;
+    genotype->phased              = phased;
+    genotype->nbits               = nbits;
+    genotype->ploidy_missingness  = plo_miss;
+    genotype->owns_ploidy         = false;   /* owned by bgen_file scratch */
 
     if (phased && genotype->max_ploidy == 0) {
         bgen_error("phased genotype cannot have zero `max_ploidy`");
@@ -115,15 +117,15 @@ int bgen_layout2_read_header(struct bgen_file* bgen_file, struct bgen_genotype* 
         genotype->ncombs = choose((unsigned)(genotype->max_ploidy) + (unsigned)(nalleles - 1),
                                   (unsigned)(nalleles - 1));
 
-    genotype->chunk = chunk;
+    genotype->chunk     = chunk;
     genotype->chunk_ptr = chunk_ptr;
+    genotype->owns_chunk = !chunk_is_scratch;  /* false = file owns scratch; true = malloc'd */
 
     return 0;
 
 err:
-    bgen_free(chunk);
-    bgen_free(plo_miss);
-    genotype->chunk = NULL;
+    if (!chunk_is_scratch) bgen_free(chunk);
+    genotype->chunk              = NULL;
     genotype->ploidy_missingness = NULL;
     return 1;
 }
@@ -144,6 +146,20 @@ void bgen_layout2_read_genotype32(struct bgen_genotype* genotype, float* probs)
         read_unphased_genotype32(genotype, probs);
 }
 
+/* ── Plan D: fast byte-aligned read for nbits divisible by 8 ────────────────
+ * When nbits is a multiple of 8, each stored value occupies exactly nbits/8
+ * contiguous bytes in the chunk.  sample_start always stays byte-aligned
+ * because the per-sample advance (nbits × ncombs-per-sample) is also a
+ * multiple of 8 bits.  We replace the inner bit-extraction loop with a single
+ * memcpy, which compilers auto-vectorise on modern targets.
+ * ────────────────────────────────────────────────────────────────────────── */
+#define READ_UINT_BYTES(chunk_ptr, bit_offset, nbytes, out_u64)              \
+    do {                                                                     \
+        uint64_t _v = 0;                                                     \
+        memcpy(&_v, (chunk_ptr) + (bit_offset) / 8, (nbytes));              \
+        (out_u64) = _v;                                                      \
+    } while (0)
+
 #define MAKE_READ_PHASED_GENOTYPE(BITS, FPTYPE)                                               \
     static void read_phased_genotype##BITS(struct bgen_genotype* genotype, FPTYPE* probs)     \
     {                                                                                         \
@@ -151,6 +167,8 @@ void bgen_layout2_read_genotype32(struct bgen_genotype* genotype, float* probs)
         unsigned nalleles = genotype->nalleles;                                               \
         uint8_t  max_ploidy = genotype->max_ploidy;                                           \
         FPTYPE   denom = (FPTYPE)((((uint64_t)1 << nbits)) - 1);                              \
+        int      aligned = (nbits % 8 == 0);                                                  \
+        unsigned nbytes  = nbits / 8;                                                         \
                                                                                               \
         uint64_t sample_start = 0;                                                            \
         for (uint32_t j = 0; j < genotype->nsamples; ++j) {                                   \
@@ -166,21 +184,19 @@ void bgen_layout2_read_genotype32(struct bgen_genotype* genotype, float* probs)
                                                                                               \
             uint64_t haplo_start = 0;                                                         \
             for (uint8_t i = 0; i < ploidy; ++i) {                                            \
-                                                                                              \
                 uint64_t uip_sum = 0;                                                         \
                 uint64_t allele_start = 0;                                                    \
                 for (uint16_t ii = 0; ii < nalleles - 1; ++ii) {                              \
-                                                                                              \
                     uint64_t ui_prob = 0;                                                     \
                     uint64_t offset = sample_start + haplo_start + allele_start;              \
-                                                                                              \
-                    for (uint8_t bi = 0; bi < nbits; ++bi) {                                  \
-                                                                                              \
-                        if (get_bit(genotype->chunk_ptr, bi + offset)) {                      \
-                            ui_prob |= ((uint64_t)1 << bi);                                   \
+                    if (aligned) {                                                             \
+                        READ_UINT_BYTES(genotype->chunk_ptr, offset, nbytes, ui_prob);        \
+                    } else {                                                                   \
+                        for (uint8_t bi = 0; bi < nbits; ++bi) {                              \
+                            if (get_bit(genotype->chunk_ptr, bi + offset))                    \
+                                ui_prob |= ((uint64_t)1 << bi);                               \
                         }                                                                     \
                     }                                                                         \
-                                                                                              \
                     *probs = (FPTYPE)ui_prob / denom;                                         \
                     ++probs;                                                                  \
                     uip_sum += ui_prob;                                                       \
@@ -205,8 +221,9 @@ MAKE_READ_PHASED_GENOTYPE(32, float)
         uint8_t  nbits = genotype->nbits;                                                     \
         uint16_t nalleles = genotype->nalleles;                                               \
         uint8_t  max_ploidy = genotype->max_ploidy;                                           \
-                                                                                              \
         FPTYPE   denom = (FPTYPE)((((uint64_t)1 << nbits)) - 1);                              \
+        int      aligned = (nbits % 8 == 0);                                                  \
+        unsigned nbytes  = nbits / 8;                                                         \
         unsigned max_ncombs =                                                                 \
             choose(nalleles + (unsigned)(max_ploidy - 1), (unsigned)(nalleles - 1));          \
                                                                                               \
@@ -225,23 +242,21 @@ MAKE_READ_PHASED_GENOTYPE(32, float)
             }                                                                                 \
                                                                                               \
             uint##BITS##_t uip_sum = 0;                                                       \
-                                                                                              \
             uint64_t geno_start = 0;                                                          \
             for (uint8_t i = 0; i < (uint8_t)(ncombs - 1); ++i) {                             \
-                                                                                              \
-                uint##BITS##_t ui_prob = 0;                                                   \
-                uint64_t       offset = sample_start + geno_start;                            \
-                                                                                              \
-                for (uint8_t bi = 0; bi < (uint8_t)nbits; ++bi) {                             \
-                                                                                              \
-                    if (get_bit(genotype->chunk_ptr, bi + offset)) {                          \
-                        ui_prob |= ((uint##BITS##_t)1 << bi);                                 \
+                uint64_t ui_prob = 0;                                                         \
+                uint64_t offset = sample_start + geno_start;                                  \
+                if (aligned) {                                                                 \
+                    READ_UINT_BYTES(genotype->chunk_ptr, offset, nbytes, ui_prob);             \
+                } else {                                                                       \
+                    for (uint8_t bi = 0; bi < (uint8_t)nbits; ++bi) {                         \
+                        if (get_bit(genotype->chunk_ptr, bi + offset))                        \
+                            ui_prob |= ((uint##BITS##_t)1 << bi);                             \
                     }                                                                         \
                 }                                                                             \
-                                                                                              \
                 *probs = (FPTYPE)ui_prob / denom;                                             \
                 ++probs;                                                                      \
-                uip_sum += ui_prob;                                                           \
+                uip_sum += (uint##BITS##_t)ui_prob;                                           \
                 geno_start += nbits;                                                          \
             }                                                                                 \
             *probs = (denom - (FPTYPE)uip_sum) / denom;                                       \
@@ -255,65 +270,3 @@ MAKE_READ_PHASED_GENOTYPE(32, float)
 MAKE_UNPHASED_GENOTYPE(64, double)
 MAKE_UNPHASED_GENOTYPE(32, float)
 
-static char* decompress(struct bgen_file* bgen_file)
-{
-    char* compressed_chunk = NULL;
-    char* chunk = NULL;
-
-    size_t compressed_length = 0;
-    if (fread(&compressed_length, 4, 1, bgen_file_stream(bgen_file)) < 1) {
-        bgen_perror_eof(bgen_file_stream(bgen_file), "could not read compressed length");
-        goto err;
-    }
-    if (compressed_length < 4) {
-        bgen_error("wrong compressed (corrupted file?)");
-        goto err;
-    }
-
-    compressed_length -= 4;
-
-    size_t length = 0;
-    if (fread(&length, 4, 1, bgen_file_stream(bgen_file)) < 1) {
-        bgen_perror_eof(bgen_file_stream(bgen_file), "could not read length");
-        goto err;
-    }
-
-    compressed_chunk = malloc(compressed_length);
-    if (compressed_chunk == NULL) {
-        bgen_error("could not malloc compressed chunk");
-        goto err;
-    }
-
-    if (fread(compressed_chunk, compressed_length, 1, bgen_file_stream(bgen_file)) < 1) {
-        bgen_perror_eof(bgen_file_stream(bgen_file), "could not read chunk");
-        goto err;
-    }
-
-    chunk = malloc(length);
-    if (chunk == NULL) {
-        bgen_error("could not malloc chunk");
-        goto err;
-    }
-
-    if (bgen_file_compression(bgen_file) == 1) {
-        if (bgen_unzlib(compressed_chunk, compressed_length, &chunk, &length))
-            goto err;
-
-    } else if (bgen_file_compression(bgen_file) == 2) {
-        if (bgen_unzstd(compressed_chunk, compressed_length, (void**)&chunk, &length))
-            goto err;
-
-    } else {
-        bgen_error("unrecognized compression method");
-        goto err;
-    }
-
-    bgen_free(compressed_chunk);
-
-    return chunk;
-
-err:
-    bgen_free(compressed_chunk);
-    bgen_free(chunk);
-    return NULL;
-}

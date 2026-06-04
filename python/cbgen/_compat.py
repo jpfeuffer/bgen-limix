@@ -135,6 +135,68 @@ class bgen_file:
 
         return d["probability"]
 
+    def read_ncombs(self, offset: int) -> int:
+        """Return the number of genotype combinations for the variant at offset.
+
+        Unlike :meth:`read_probability`, this does **not** allocate or fill a
+        probability array — it only opens the genotype header and reads the
+        ``ncombs`` field.
+
+        Parameters
+        ----------
+        offset
+            Variant offset (from VariantInfo.offset).
+
+        Returns
+        -------
+        Number of genotype combinations (int).
+        """
+        return int(self._impl.read_ncombs(offset))
+
+    def get_ncombs(self, offsets: list[int]) -> npt.NDArray:
+        """Return the number of genotype combinations for each offset.
+
+        Header-only scan — does not decode probability arrays.
+
+        Parameters
+        ----------
+        offsets
+            List of genotype offsets.
+
+        Returns
+        -------
+        uint32 numpy array of shape ``(len(offsets),)``.
+        """
+        return self._impl.get_ncombs(offsets)
+
+    def read_genotypes_batch(
+        self,
+        offsets: list[int],
+        max_ncomb: int | None = None,
+    ) -> npt.NDArray:
+        """
+        Read genotype probabilities for multiple variants into a padded array.
+
+        Parameters
+        ----------
+        offsets
+            List of genotype offsets from the metafile.
+        max_ncomb
+            Maximum genotype combinations per sample.  ``None`` (default) to
+            auto-detect by scanning all offsets (one header read per variant).
+            Provide an explicit value if you already know the maximum to skip
+            the pre-scan.
+
+        Returns
+        -------
+        Float64 numpy array of shape ``(n_variants, nsamples, max_ncomb)``.
+        Unused combination slots (when a variant has fewer combinations than
+        ``max_ncomb``) are NaN-filled.
+        """
+        if max_ncomb is None:
+            return self._impl.read_genotypes_batch(offsets)
+        return self._impl.read_genotypes_batch(offsets, max_ncomb)
+
     def close(self):
         """Close file stream."""
         self._impl.close()
@@ -182,6 +244,11 @@ class bgen_metafile:
     def partition_size(self) -> int:
         """Number of variants per partition."""
         return self._impl.partition_size
+
+    @property
+    def all_biallelic(self) -> int:
+        """1 = all variants biallelic, 0 = at least one multiallelic, 2 = unknown (v04 metafile)."""
+        return self._impl.all_biallelic
 
     def read_partition(self, index: int) -> Partition:
         """

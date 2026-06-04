@@ -38,18 +38,21 @@ struct bgen_metafile* bgen_metafile_create(struct bgen_file* bgen_file, char con
 
     metafile->partition_offset = malloc(sizeof(uint64_t) * npartitions);
 
+    uint8_t  all_biallelic = 1; /* will be updated by write_metafile_metadata_block */
     uint64_t metadata_block_size =
         write_metafile_metadata_block(metafile->stream, metafile->partition_offset,
-                                      npartitions, metafile->nvariants, bgen_file, verbose);
+                                      npartitions, metafile->nvariants, bgen_file, verbose,
+                                      &all_biallelic);
 
     if (metadata_block_size == 0)
         goto err;
 
     metafile->metadata_block_size = metadata_block_size;
+    metafile->all_biallelic       = all_biallelic;
     rewind(metafile->stream);
 
     if (write_metafile_header(metafile->stream, metafile->nvariants, npartitions,
-                              metafile->metadata_block_size))
+                              metafile->metadata_block_size, all_biallelic))
         goto err;
 
     if (write_metafile_offsets_block(metafile->stream, npartitions,
@@ -77,16 +80,19 @@ struct bgen_metafile* bgen_metafile_open(char const* filepath)
         goto err;
     }
 
-    char header[] = BGEN_METAFILE_SIGNATURE;
+    /* Support both v04 (13 bytes sig, 29-byte header) and v05 (+ all_biallelic). */
+    char header[14] = {0}; /* 13 bytes signature + null terminator */
 
-    if (fread(header, strlen(BGEN_METAFILE_SIGNATURE), 1, metafile->stream) < 1) {
+    if (fread(header, 13, 1, metafile->stream) < 1) {
         bgen_perror_eof(metafile->stream, "could not fetch the metafile header");
         goto err;
     }
 
-    if (strncmp(header, BGEN_METAFILE_SIGNATURE, strlen(BGEN_METAFILE_SIGNATURE))) {
-        bgen_error("unrecognized bgen index version: %.*s",
-                   (int)strlen(BGEN_METAFILE_SIGNATURE), header);
+    int is_v05 = (strncmp(header, BGEN_METAFILE_SIGNATURE_V05, 13) == 0);
+    int is_v04 = (strncmp(header, BGEN_METAFILE_SIGNATURE_V04, 13) == 0);
+
+    if (!is_v05 && !is_v04) {
+        bgen_error("unrecognized bgen index version: %.13s", header);
         goto err;
     }
 
@@ -104,6 +110,16 @@ struct bgen_metafile* bgen_metafile_open(char const* filepath)
     if (fread(&(metafile->metadata_block_size), sizeof(uint64_t), 1, metafile->stream) < 1) {
         bgen_perror_eof(metafile->stream, "could not read the metadata block size");
         goto err;
+    }
+
+    /* v05: read the extra all_biallelic byte; v04: mark as unknown (2). */
+    if (is_v05) {
+        if (fread(&(metafile->all_biallelic), sizeof(uint8_t), 1, metafile->stream) < 1) {
+            bgen_perror_eof(metafile->stream, "could not read all_biallelic flag");
+            goto err;
+        }
+    } else {
+        metafile->all_biallelic = 2; /* unknown for old files */
     }
 
     metafile->partition_offset = malloc(metafile->npartitions * sizeof(uint64_t));
@@ -131,6 +147,11 @@ uint32_t bgen_metafile_npartitions(struct bgen_metafile const* metafile)
 uint32_t bgen_metafile_nvariants(struct bgen_metafile const* metafile)
 {
     return metafile->nvariants;
+}
+
+uint8_t bgen_metafile_all_biallelic(struct bgen_metafile const* metafile)
+{
+    return metafile->all_biallelic;
 }
 
 struct bgen_partition const* bgen_metafile_read_partition(struct bgen_metafile const* metafile,

@@ -62,7 +62,7 @@ static uint64_t write_variant(FILE* stream, const struct bgen_variant* variant)
 }
 
 static int write_metafile_header(FILE* stream, uint32_t nvariants, uint32_t npartitions,
-                                 uint64_t metadata_block_size)
+                                 uint64_t metadata_block_size, uint8_t all_biallelic)
 {
     char const name[] = BGEN_METAFILE_SIGNATURE;
 
@@ -86,12 +86,18 @@ static int write_metafile_header(FILE* stream, uint32_t nvariants, uint32_t npar
         return 1;
     }
 
+    if (fwrite(&all_biallelic, sizeof(all_biallelic), 1, stream) != 1) {
+        bgen_perror("could not write all_biallelic flag");
+        return 1;
+    }
+
     return 0;
 }
 
 static uint64_t write_metafile_metadata_block(FILE* stream, uint64_t* poffset,
                                               uint32_t npartitions, uint32_t nvariants,
-                                              struct bgen_file* bgen, int verbose)
+                                              struct bgen_file* bgen, int verbose,
+                                              uint8_t* out_all_biallelic)
 {
     struct athr* at = NULL;
     if (verbose) {
@@ -104,6 +110,7 @@ static uint64_t write_metafile_metadata_block(FILE* stream, uint64_t* poffset,
 
     uint64_t i = 0, j = 0;
     int      error = 0;
+    int      any_multiallelic = 0;
 
     int64_t ftold = bgen_ftell(stream);
     if (ftold < 0) {
@@ -120,6 +127,9 @@ static uint64_t write_metafile_metadata_block(FILE* stream, uint64_t* poffset,
             bgen_error("could not write every variant");
             goto err;
         }
+
+        if (variant->nalleles > 2)
+            any_multiallelic = 1;
 
         uint64_t size = write_variant(stream, variant);
 
@@ -142,6 +152,9 @@ static uint64_t write_metafile_metadata_block(FILE* stream, uint64_t* poffset,
 
     if (verbose)
         athr_finish(at);
+
+    if (out_all_biallelic)
+        *out_all_biallelic = (uint8_t)(any_multiallelic ? 0 : 1);
 
     return (curr_offset - (uint64_t)ftold);
 err:

@@ -69,4 +69,11 @@ BGEN_EXPORT struct bgen_partition const* bgen_metafile_read_partition(
  */
 BGEN_EXPORT int bgen_metafile_close(struct bgen_metafile const* metafile);
 
+/** Get the all_biallelic flag from a v05 metafile.
+ *
+ * @return 1 if all variants are biallelic, 0 if at least one is multiallelic,
+ *         2 if unknown (v04 metafile or not yet determined).
+ */
+BGEN_EXPORT uint8_t bgen_metafile_all_biallelic(struct bgen_metafile const* metafile);
+
 #endif

@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <algorithm>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -238,11 +239,87 @@ public:
         return result;
     }
 
+    /** Return the number of genotype combinations for the variant at *offset*
+     *  without allocating or filling any probability array.
+     */
+    unsigned read_ncombs(uint64_t offset) {
+        struct bgen_genotype* gt = bgen_file_open_genotype(handle_.ptr, offset);
+        if (!gt)
+            throw std::runtime_error("read_ncombs: could not open genotype at offset.");
+        unsigned nc = bgen_genotype_ncombs(gt);
+        bgen_genotype_close(gt);
+        return nc;
+    }
+
     void close() {
         if (handle_.ptr) {
             bgen_file_close(handle_.ptr);
             handle_.ptr = nullptr;
         }
+    }
+
+    /**
+     * Return ncombs for each offset (header-only scan, no probability decode).
+     * @return 1-D numpy uint32 array of length n_offsets.
+     */
+    nb::object get_ncombs(const std::vector<uint64_t>& offsets) {
+        uint32_t n = (uint32_t)offsets.size();
+        npy_intp dims[1] = {(npy_intp)n};
+        PyObject* arr = PyArray_EMPTY(1, dims, NPY_UINT32, 0);
+        if (!arr) throw std::bad_alloc();
+        uint32_t* out = static_cast<uint32_t*>(PyArray_DATA((PyArrayObject*)arr));
+        int err = bgen_file_read_ncombs_batch(handle_.ptr, offsets.data(), n, out);
+        if (err) {
+            Py_DECREF(arr);
+            throw std::runtime_error("get_ncombs: failed to read ncombs");
+        }
+        return nb::steal<nb::object>(arr);
+    }
+
+    /**
+     * Read probabilities for multiple variants into a padded rectangular array.
+     *
+     * @param offsets   List/array of genotype offsets from the metafile.
+     * @param max_ncomb Maximum genotype combinations per sample.  Pass -1
+     *                  (default) to auto-detect by scanning all offsets.
+     * @return float64 numpy array of shape (n_variants, nsamples, max_ncomb).
+     *         Unused combination slots are NaN-filled.
+     */
+    nb::object read_genotypes_batch(const std::vector<uint64_t>& offsets, int32_t max_ncomb = -1) {
+        uint32_t n = (uint32_t)offsets.size();
+        if (n == 0) {
+            npy_intp dims[3] = {0, (npy_intp)nsamples(), 0};
+            PyObject* empty = PyArray_EMPTY(3, dims, NPY_DOUBLE, 0);
+            if (!empty) throw std::bad_alloc();
+            return nb::steal<nb::object>(empty);
+        }
+
+        uint32_t ns = (uint32_t)nsamples();
+        uint32_t mnc;
+
+        if (max_ncomb < 0) {
+            /* Auto-detect: scan all offsets and take the maximum ncombs. */
+            std::vector<uint32_t> nc_arr(n);
+            int err = bgen_file_read_ncombs_batch(handle_.ptr, offsets.data(), n, nc_arr.data());
+            if (err)
+                throw std::runtime_error(
+                    "read_genotypes_batch: ncombs pre-scan failed");
+            mnc = *std::max_element(nc_arr.begin(), nc_arr.end());
+        } else {
+            mnc = (uint32_t)max_ncomb;
+        }
+
+        npy_intp dims[3] = {(npy_intp)n, (npy_intp)ns, (npy_intp)mnc};
+        PyObject* arr = PyArray_EMPTY(3, dims, NPY_DOUBLE, 0);
+        if (!arr) throw std::bad_alloc();
+        double* out = static_cast<double*>(PyArray_DATA((PyArrayObject*)arr));
+
+        int err = bgen_file_read_genotypes_batch_padded(handle_.ptr, offsets.data(), n, mnc, out);
+        if (err) {
+            Py_DECREF(arr);
+            throw std::runtime_error("read_genotypes_batch: padded batch failed");
+        }
+        return nb::steal<nb::object>(arr);
     }
 
 private:
@@ -267,6 +344,9 @@ public:
         uint32_t np = npartitions();
         return (nv + np - 1) / np;  // ceildiv
     }
+
+    /** 1 = all biallelic, 0 = at least one multiallelic, 2 = unknown (v04 metafile) */
+    uint8_t all_biallelic() const { return bgen_metafile_all_biallelic(handle_.ptr); }
 
     PartitionResult read_partition(uint32_t index) {
         const struct bgen_partition* partition =
@@ -364,6 +444,17 @@ NB_MODULE(_core, m) {
              "filepath"_a, "verbose"_a = false)
         .def("read_genotype", &BgenFile::read_genotype, "offset"_a)
         .def("read_genotype32", &BgenFile::read_genotype32, "offset"_a)
+        .def("read_ncombs", &BgenFile::read_ncombs, "offset"_a,
+             "Return the number of genotype combinations for the variant at offset "
+             "without materialising the probability array.")
+        .def("get_ncombs", &BgenFile::get_ncombs, "offsets"_a,
+             "Return a uint32 array of ncombs values for each offset (header-only scan).")
+        .def("read_genotypes_batch", &BgenFile::read_genotypes_batch,
+             "offsets"_a, "max_ncomb"_a = -1,
+             "Read probabilities for multiple variants into a padded rectangular array. "
+             "Returns float64 array of shape (n_variants, nsamples, max_ncomb). "
+             "Unused combination slots are NaN-filled. "
+             "Pass max_ncomb=-1 (default) to auto-detect from all offsets.")
         .def("close", &BgenFile::close)
         .def("__enter__", [](nb::object self) -> nb::object { return self; })
         .def("__exit__", [](BgenFile& self, nb::args) {
@@ -376,6 +467,8 @@ NB_MODULE(_core, m) {
         .def_prop_ro("npartitions", &BgenMetafile::npartitions)
         .def_prop_ro("nvariants", &BgenMetafile::nvariants)
         .def_prop_ro("partition_size", &BgenMetafile::partition_size)
+        .def_prop_ro("all_biallelic", &BgenMetafile::all_biallelic,
+             "1=all biallelic, 0=has multiallelic, 2=unknown (v04 metafile)")
         .def("read_partition", &BgenMetafile::read_partition, "index"_a)
         .def("close", &BgenMetafile::close)
         .def("__enter__", [](nb::object self) -> nb::object { return self; })

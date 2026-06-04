@@ -119,6 +119,24 @@ class BgenFile:
 
         return d["probability"]
 
+    def read_ncombs(self, offset: int) -> int:
+        """Return the number of genotype combinations for the variant at offset.
+
+        Unlike :meth:`read_probability`, this does **not** allocate or fill a
+        probability array — it only opens the genotype header and reads the
+        ``ncombs`` field.
+
+        Parameters
+        ----------
+        offset
+            Variant offset (from VariantInfo.offset).
+
+        Returns
+        -------
+        Number of genotype combinations (int).
+        """
+        return int(self._impl.read_ncombs(offset))
+
     def close(self) -> None:
         self._impl.close()
 

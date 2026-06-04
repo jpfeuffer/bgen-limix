@@ -5,6 +5,61 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+struct bgen_zlib_ctx_s
+{
+    zng_stream strm;
+};
+
+bgen_zlib_ctx* bgen_zlib_ctx_create(void)
+{
+    bgen_zlib_ctx* ctx = malloc(sizeof(bgen_zlib_ctx));
+    if (!ctx) return NULL;
+    ctx->strm.zalloc = Z_NULL;
+    ctx->strm.zfree  = Z_NULL;
+    ctx->strm.opaque = Z_NULL;
+    if (zng_inflateInit(&ctx->strm) != Z_OK) {
+        free(ctx);
+        return NULL;
+    }
+    return ctx;
+}
+
+void bgen_zlib_ctx_destroy(bgen_zlib_ctx* ctx)
+{
+    if (!ctx) return;
+    zng_inflateEnd(&ctx->strm);
+    free(ctx);
+}
+
+/* Reuse an existing context instead of init+end every call. */
+int bgen_unzlib_reuse(bgen_zlib_ctx* ctx, char const* src, size_t src_size, char** dst,
+                      size_t* dst_size)
+{
+    if (!ctx) return bgen_unzlib(src, src_size, dst, dst_size);
+
+    if (src_size > UINT_MAX || *dst_size > UINT_MAX) {
+        bgen_error("zlib-ng size overflow");
+        return 1;
+    }
+
+    zng_stream* strm = &ctx->strm;
+    if (zng_inflateReset(strm) != Z_OK) {
+        bgen_error("zlib-ng inflateReset failed");
+        return 1;
+    }
+    strm->avail_in  = (unsigned)src_size;
+    strm->next_in   = (unsigned char const*)src;
+    strm->avail_out = (unsigned)*dst_size;
+    strm->next_out  = (unsigned char*)*dst;
+
+    int e = zng_inflate(strm, Z_FINISH);
+    if (e != Z_STREAM_END) {
+        bgen_error("zlib-ng inflate failed (%s)", zng_zError(e));
+        return 1;
+    }
+    return 0;
+}
+
 int bgen_unzlib(char const* src, size_t src_size, char** dst, size_t* dst_size)
 {
     zng_stream strm = {

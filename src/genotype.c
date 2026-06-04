@@ -7,8 +7,8 @@
 
 void bgen_genotype_close(struct bgen_genotype const* genotype)
 {
-    bgen_free(genotype->ploidy_missingness);
-    bgen_free(genotype->chunk);
+    if (genotype->owns_ploidy) bgen_free(genotype->ploidy_missingness);
+    if (genotype->owns_chunk)  bgen_free(genotype->chunk);
     bgen_free(genotype);
 }
 
