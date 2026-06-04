@@ -29,12 +29,22 @@ jobs:
 
 
   build_wheels:
-    name: Wheels on ${{ matrix.os }}
+    name: Wheels on ${{ matrix.label }}
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-15, windows-2025]
+        include:
+          - os: ubuntu-24.04
+            label: ubuntu-24.04-x86_64
+          - os: ubuntu-24.04-arm
+            label: ubuntu-24.04-aarch64
+          - os: macos-15
+            label: macos-15
+          - os: windows-2025
+            label: windows-2025
 
     steps:
       - uses: actions/checkout@v6.0.2
@@ -42,16 +52,14 @@ jobs:
       - name: Build wheels
         uses: pypa/cibuildwheel@v3.4.1
         env:
-          # Build for CPython 3.11–3.14
-          CIBW_BUILD: "cp311-* cp312-* cp313-* cp314-*"
+          # Build for CPython 3.11 only — stable ABI (abi3) wheel works for all 3.11+
+          CIBW_BUILD: "cp311-*"
           CIBW_SKIP: "*-musllinux_i686"
           # Test the built wheels
           CIBW_TEST_REQUIRES: pytest
           CIBW_TEST_COMMAND: pytest {project}/python/tests -v
           # macOS: build universal2 wheels on the ARM runner
           CIBW_ARCHS_MACOS: "native"
-          # Linux: build x86_64 and aarch64
-          CIBW_ARCHS_LINUX: "x86_64 aarch64"
           # Windows: build AMD64 only
           CIBW_ARCHS_WINDOWS: "AMD64"
           # Install OpenSSL headers needed by fetched curl on Linux
@@ -61,7 +69,7 @@ jobs:
 
       - uses: actions/upload-artifact@v7.0.1
         with:
-          name: cibw-wheels-${{ matrix.os }}-${{ strategy.job-index }}
+          name: cibw-wheels-${{ matrix.label }}
           path: ./wheelhouse/*.whl
 
   publish:
