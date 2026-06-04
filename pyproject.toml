@@ -3,7 +3,7 @@ requires = ["scikit-build-core>=0.10", "nanobind>=2.0", "numpy>=2.0"]
 build-backend = "scikit_build_core.build"
 
 [project]
-name = "cbgen"
+name = "bgen-limix"
 version = "4.2.1"
 description = "Python wrapper around the BGEN C library"
 readme = "README.md"
