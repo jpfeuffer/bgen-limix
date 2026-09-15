@@ -55,7 +55,8 @@ jobs:
         env:
           # Build for CPython 3.11 only — stable ABI (abi3) wheel works for all 3.11+
           CIBW_BUILD: "cp311-*"
-          CIBW_SKIP: "*-musllinux_i686"
+          # nanobind-backend (split mode) ships no musllinux wheels, so those builds can't install it
+          CIBW_SKIP: "*-musllinux*"
           # Test the built wheels
           CIBW_TEST_REQUIRES: pytest
           CIBW_TEST_COMMAND: pytest {project}/python/tests -v

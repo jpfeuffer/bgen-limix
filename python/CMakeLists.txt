@@ -38,7 +38,9 @@ else()
   add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/.." "${CMAKE_BINARY_DIR}/_bgen")
 endif()
 
-find_package(Python REQUIRED COMPONENTS Interpreter Development.Module NumPy)
+# Development.SABIModule is required by nanobind split mode on Windows.
+find_package(Python REQUIRED COMPONENTS Interpreter Development.Module NumPy
+  OPTIONAL_COMPONENTS Development.SABIModule)
 find_package(nanobind CONFIG REQUIRED)
 
 # Split mode: link against the nanobind-backend wheel instead of statically
