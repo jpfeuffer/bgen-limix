@@ -41,7 +41,9 @@ endif()
 find_package(Python REQUIRED COMPONENTS Interpreter Development.Module NumPy)
 find_package(nanobind CONFIG REQUIRED)
 
-nanobind_add_module(_core STABLE_ABI NB_STATIC ${CMAKE_CURRENT_SOURCE_DIR}/bindings.cpp)
+# Split mode: link against the nanobind-backend wheel instead of statically
+# embedding libnanobind, so a single abi3 wheel covers Python 3.10+.
+nanobind_add_module(_core STABLE_ABI BACKEND_MODULE nanobind_backend ${CMAKE_CURRENT_SOURCE_DIR}/bindings.cpp)
 target_link_libraries(_core PRIVATE BGEN::bgen)
 target_include_directories(_core PRIVATE ${Python_NumPy_INCLUDE_DIRS})
 

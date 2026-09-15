@@ -1,5 +1,5 @@
 [build-system]
-requires = ["scikit-build-core>=0.10", "nanobind>=2.0", "numpy>=2.0"]
+requires = ["scikit-build-core>=0.10", "nanobind>=3.0", "numpy>=2.0"]
 build-backend = "scikit_build_core.build"
 
 [project]
@@ -23,6 +23,7 @@ classifiers = [
 dependencies = [
     "numpy>=2.0",
     "pooch>=1.6",
+    "nanobind-backend>=1.0",
 ]
 
 [project.urls]
