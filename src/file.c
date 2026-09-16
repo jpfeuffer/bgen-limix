@@ -1,16 +1,15 @@
 #include "file.h"
 #include "bgen/file.h"
 #include "bgen/genotype.h"
+#include "bgen/s3stream.h"
 #include "bstring.h"
 #include "free.h"
 #include "genotype.h"
-#include "io.h"
 #include "layout1.h"
 #include "layout2.h"
 #include "mem.h"
 #include "report.h"
 #include "samples.h"
-#include "stream.h"
 #include "strdup.h"
 #include "unzlib.h"
 #include "unzstd.h"
@@ -21,9 +20,9 @@
 
 struct bgen_file
 {
-    char*    filepath;
-    FILE*    stream;
-    uint32_t nvariants;
+    char*             filepath;
+    s3stream_handle*  stream;
+    uint32_t          nvariants;
     uint32_t nsamples;
     unsigned compression;
     unsigned layout;
@@ -52,8 +51,8 @@ struct bgen_file* bgen_file_open(char const* filepath)
         return NULL;
 
     bgen->variants_start = 0;
-    if (fread(&bgen->variants_start, 4, 1, bgen->stream) != 1) {
-        bgen_perror_eof(bgen->stream, "could not read the `variants_start` field");
+    if (bgen_stream_fread(bgen->stream, &bgen->variants_start, 4) != 1) {
+        bgen_perror_eof(s3stream_handle_eof(bgen->stream), "could not read the `variants_start` field");
         goto err;
     }
 
@@ -74,7 +73,7 @@ struct bgen_file* bgen_file_open(char const* filepath)
     }
 
     /* if they actually exist */
-    if ((bgen->samples_start = bgen_ftell(bgen->stream)) < 0) {
+    if ((bgen->samples_start = s3stream_handle_tell(bgen->stream)) < 0) {
         bgen_perror("could not ftell");
         goto err;
     }
@@ -88,8 +87,8 @@ err:
 
 void bgen_file_close(struct bgen_file const* bgen)
 {
-    if (bgen->stream != NULL && fclose(bgen->stream))
-        bgen_perror("could not close %s file", bgen->filepath);
+    if (bgen->stream != NULL)
+        s3stream_handle_close(bgen->stream);
     bgen_free(bgen->filepath);
     bgen_free(bgen->chunk_scratch);
     bgen_free(bgen->ploidy_scratch);
@@ -109,7 +108,7 @@ struct bgen_samples* bgen_file_read_samples(struct bgen_file* bgen)
 {
     char* block = NULL;
 
-    if (bgen_fseek(bgen->stream, bgen->samples_start, SEEK_SET)) {
+    if (s3stream_handle_seek(bgen->stream, bgen->samples_start, SEEK_SET)) {
         bgen_perror("could not fseek to `samples_start`");
         return NULL;
     }
@@ -122,14 +121,14 @@ struct bgen_samples* bgen_file_read_samples(struct bgen_file* bgen)
     struct bgen_samples* samples = bgen_samples_create(bgen->nsamples);
 
     uint32_t block_size = 0;
-    if (fread(&block_size, sizeof(block_size), 1, bgen->stream) != 1) {
-        bgen_perror_eof(bgen->stream, "could not read block size");
+    if (bgen_stream_fread(bgen->stream, &block_size, sizeof(block_size)) != 1) {
+        bgen_perror_eof(s3stream_handle_eof(bgen->stream), "could not read block size");
         goto err;
     }
 
     block = malloc(block_size - sizeof(block_size));
-    if (fread(block, block_size - sizeof(block_size), 1, bgen->stream) != 1) {
-        bgen_perror_eof(bgen->stream, "could not read samples block");
+    if (bgen_stream_fread(bgen->stream, block, block_size - sizeof(block_size)) != 1) {
+        bgen_perror_eof(s3stream_handle_eof(bgen->stream), "could not read samples block");
         goto err;
     }
 
@@ -147,7 +146,7 @@ struct bgen_samples* bgen_file_read_samples(struct bgen_file* bgen)
         bgen_samples_set(samples, i, sample_id);
     }
 
-    if ((bgen->variants_start = bgen_ftell(bgen->stream)) < 0) {
+    if ((bgen->variants_start = s3stream_handle_tell(bgen->stream)) < 0) {
         bgen_error("could not ftell `variants_start`");
         goto err;
     }
@@ -172,7 +171,7 @@ struct bgen_genotype* bgen_file_open_genotype(struct bgen_file* bgen, uint64_t g
         goto err;
     }
 
-    if (bgen_fseek(bgen_file_stream(bgen), (int64_t)genotype_offset, SEEK_SET)) {
+    if (s3stream_handle_seek(bgen_file_stream(bgen), (int64_t)genotype_offset, SEEK_SET)) {
         bgen_perror("could not fseek a variant");
         goto err;
     }
@@ -194,7 +193,14 @@ err:
     return NULL;
 }
 
-FILE* bgen_file_stream(struct bgen_file const* bgen_file) { return bgen_file->stream; }
+s3stream_handle* bgen_file_stream(struct bgen_file const* bgen_file) { return bgen_file->stream; }
+
+/* See file.h: an fread(buf, size, 1, stream)-compatible wrapper, so call
+ * sites' `!= 1` / `< 1` checks stay correct without inspecting byte counts. */
+size_t bgen_stream_fread(s3stream_handle* stream, void* buf, size_t size)
+{
+    return (size_t)(s3stream_handle_read(stream, buf, size) == (int64_t)size);
+}
 
 char const* bgen_file_filepath(struct bgen_file const* bgen_file)
 {
@@ -210,7 +216,7 @@ unsigned bgen_file_compression(struct bgen_file const* bgen_file)
 
 int bgen_file_seek_variants_start(struct bgen_file* bgen_file)
 {
-    if (bgen_fseek(bgen_file->stream, bgen_file->variants_start, SEEK_SET)) {
+    if (s3stream_handle_seek(bgen_file->stream, bgen_file->variants_start, SEEK_SET)) {
         bgen_perror("could not jump to variants start");
         return 1;
     }
@@ -222,8 +228,8 @@ int bgen_file_decompress_block(struct bgen_file* f, char** chunk, size_t* size)
     char* compressed = NULL;
 
     size_t compressed_length = 0;
-    if (fread(&compressed_length, 4, 1, f->stream) < 1) {
-        bgen_perror_eof(f->stream, "could not read compressed length");
+    if (bgen_stream_fread(f->stream, &compressed_length, 4) < 1) {
+        bgen_perror_eof(s3stream_handle_eof(f->stream), "could not read compressed length");
         goto err;
     }
     if (compressed_length < 4) {
@@ -233,8 +239,8 @@ int bgen_file_decompress_block(struct bgen_file* f, char** chunk, size_t* size)
     compressed_length -= 4;
 
     size_t uncompressed_length = 0;
-    if (fread(&uncompressed_length, 4, 1, f->stream) < 1) {
-        bgen_perror_eof(f->stream, "could not read uncompressed length");
+    if (bgen_stream_fread(f->stream, &uncompressed_length, 4) < 1) {
+        bgen_perror_eof(s3stream_handle_eof(f->stream), "could not read uncompressed length");
         goto err;
     }
 
@@ -248,8 +254,8 @@ int bgen_file_decompress_block(struct bgen_file* f, char** chunk, size_t* size)
 
     compressed = malloc(compressed_length);
     if (!compressed) { bgen_error("could not malloc compressed chunk"); goto err; }
-    if (fread(compressed, compressed_length, 1, f->stream) < 1) {
-        bgen_perror_eof(f->stream, "could not read compressed data");
+    if (bgen_stream_fread(f->stream, compressed, compressed_length) < 1) {
+        bgen_perror_eof(s3stream_handle_eof(f->stream), "could not read compressed data");
         goto err;
     }
 
@@ -307,9 +313,9 @@ int bgen_file_read_genotypes_batch(struct bgen_file* f, uint64_t const* offsets,
          * the previous read left the pointer at the next metadata block
          * and the caller already seeked here (or we got lucky on consecutive
          * single-variant calls). */
-        int64_t cur_pos = bgen_ftell(f->stream);
+        int64_t cur_pos = s3stream_handle_tell(f->stream);
         if (cur_pos < 0 || cur_pos != (int64_t)offsets[i]) {
-            if (bgen_fseek(f->stream, (int64_t)offsets[i], SEEK_SET)) {
+            if (s3stream_handle_seek(f->stream, (int64_t)offsets[i], SEEK_SET)) {
                 bgen_perror("batch: could not fseek to offset %" PRIu64, offsets[i]);
                 return 1;
             }
@@ -358,9 +364,9 @@ int bgen_file_read_ncombs_batch(struct bgen_file* f, uint64_t const* offsets,
     uint32_t nsamples = f->nsamples;
 
     for (uint32_t i = 0; i < n_offsets; ++i) {
-        int64_t cur_pos = bgen_ftell(f->stream);
+        int64_t cur_pos = s3stream_handle_tell(f->stream);
         if (cur_pos < 0 || cur_pos != (int64_t)offsets[i]) {
-            if (bgen_fseek(f->stream, (int64_t)offsets[i], SEEK_SET)) {
+            if (s3stream_handle_seek(f->stream, (int64_t)offsets[i], SEEK_SET)) {
                 bgen_perror("ncombs_batch: could not fseek to offset %" PRIu64, offsets[i]);
                 return 1;
             }
@@ -410,9 +416,9 @@ int bgen_file_read_genotypes_batch_padded(struct bgen_file* f, uint64_t const* o
     for (uint64_t k = 0; k < total; ++k) out[k] = NAN;
 
     for (uint32_t i = 0; i < n_offsets; ++i) {
-        int64_t cur_pos = bgen_ftell(f->stream);
+        int64_t cur_pos = s3stream_handle_tell(f->stream);
         if (cur_pos < 0 || cur_pos != (int64_t)offsets[i]) {
-            if (bgen_fseek(f->stream, (int64_t)offsets[i], SEEK_SET)) {
+            if (s3stream_handle_seek(f->stream, (int64_t)offsets[i], SEEK_SET)) {
                 bgen_perror("padded_batch: could not fseek to offset %" PRIu64, offsets[i]);
                 return 1;
             }
@@ -490,7 +496,7 @@ static struct bgen_file* bgen_file_create(char const* filepath)
     bgen->zlib_ctx = NULL;
     bgen->zstd_ctx = NULL;
 
-    if (!(bgen->stream = bgen_stream_open(bgen->filepath))) {
+    if (!(bgen->stream = s3stream_handle_open(bgen->filepath))) {
         bgen_perror("could not open file %s", bgen->filepath);
         bgen_file_close(bgen);
         return NULL;
@@ -515,36 +521,36 @@ static int bgen_file_read_header(struct bgen_file* bgen)
     uint32_t magic_number = 0;
     uint32_t flags = 0;
 
-    if (fread(&header_length, sizeof(header_length), 1, bgen->stream) != 1) {
-        bgen_perror_eof(bgen->stream, "could not read header length");
+    if (bgen_stream_fread(bgen->stream, &header_length, sizeof(header_length)) != 1) {
+        bgen_perror_eof(s3stream_handle_eof(bgen->stream), "could not read header length");
         return 1;
     }
 
-    if (fread(&bgen->nvariants, sizeof(bgen->nvariants), 1, bgen->stream) != 1) {
-        bgen_perror_eof(bgen->stream, "could not read number of variants");
+    if (bgen_stream_fread(bgen->stream, &bgen->nvariants, sizeof(bgen->nvariants)) != 1) {
+        bgen_perror_eof(s3stream_handle_eof(bgen->stream), "could not read number of variants");
         return 1;
     }
 
-    if (fread(&bgen->nsamples, sizeof(bgen->nsamples), 1, bgen->stream) != 1) {
-        bgen_perror_eof(bgen->stream, "could not read number of samples");
+    if (bgen_stream_fread(bgen->stream, &bgen->nsamples, sizeof(bgen->nsamples)) != 1) {
+        bgen_perror_eof(s3stream_handle_eof(bgen->stream), "could not read number of samples");
         return 1;
     }
 
-    if (fread(&magic_number, sizeof(magic_number), 1, bgen->stream) != 1) {
-        bgen_perror_eof(bgen->stream, "could not read magic number");
+    if (bgen_stream_fread(bgen->stream, &magic_number, sizeof(magic_number)) != 1) {
+        bgen_perror_eof(s3stream_handle_eof(bgen->stream), "could not read magic number");
         return 1;
     }
 
     if (magic_number != 1852139362)
         bgen_warning("magic number mismatch");
 
-    if (bgen_fseek(bgen->stream, header_length - 20, SEEK_CUR)) {
+    if (s3stream_handle_seek(bgen->stream, header_length - 20, SEEK_CUR)) {
         bgen_perror("fseek error while reading bgen file");
         return 1;
     }
 
-    if (fread(&flags, sizeof(flags), 1, bgen->stream) != 1) {
-        bgen_perror_eof(bgen->stream, "could not read bgen flags");
+    if (bgen_stream_fread(bgen->stream, &flags, sizeof(flags)) != 1) {
+        bgen_perror_eof(s3stream_handle_eof(bgen->stream), "could not read bgen flags");
         return 1;
     }
 

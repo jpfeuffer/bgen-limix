@@ -86,6 +86,54 @@ S3_EXPORT FILE* s3stream_open_with_credentials(const char* path,
  * and is overwritten by the next failing call on the same thread. */
 S3_EXPORT const char* s3stream_last_error(void);
 
+/* ---------------------------------------------------------------------------
+ * Handle API
+ *
+ * An alternative to s3stream_open() for callers that do not need a FILE*.
+ * s3stream_open() is lazy (range requests on demand) on POSIX but, lacking a
+ * portable way to hook custom read/seek logic into FILE*, has to stage the
+ * whole object into a temporary file on Windows before returning it.
+ *
+ * s3stream_handle_open() has no such fallback: reads are served through
+ * range requests on every platform, including Windows. Local paths are also
+ * lazy (a thin wrapper over fread/fseek), so one interface covers both.
+ *
+ * Trade-off: no FILE*, so it does not compose with APIs that expect one
+ * (e.g. libraries that only accept a stdio stream). Use s3stream_open() when
+ * that matters and you can accept the Windows staging cost; use the handle
+ * API when you control the whole read path and want guaranteed-lazy access.
+ * ------------------------------------------------------------------------- */
+
+typedef struct s3stream_handle s3stream_handle;
+
+/* Opens a path for reading. Same path handling and credential chain as
+ * s3stream_open(). Returns NULL on failure; s3stream_last_error() explains
+ * why. */
+S3_EXPORT s3stream_handle* s3stream_handle_open(const char* path);
+
+/* As s3stream_handle_open(), but uses the supplied credentials instead of the
+ * ambient chain. `creds` must be non-NULL; fields left NULL/0 fall back to
+ * ambient defaults. */
+S3_EXPORT s3stream_handle* s3stream_handle_open_with_credentials(
+    const char* path, const s3stream_credentials* creds);
+
+/* Reads up to n bytes into buf. Returns the number of bytes read (0 at EOF),
+ * or -1 on error. */
+S3_EXPORT int64_t s3stream_handle_read(s3stream_handle* handle, void* buf, size_t n);
+
+/* Repositions the handle. whence is SEEK_SET, SEEK_CUR or SEEK_END, as in
+ * fseek(). Returns 0 on success, -1 on error. */
+S3_EXPORT int s3stream_handle_seek(s3stream_handle* handle, int64_t offset, int whence);
+
+/* Returns the current offset, or -1 on error. */
+S3_EXPORT int64_t s3stream_handle_tell(const s3stream_handle* handle);
+
+/* Non-zero once a read has hit end-of-stream; matches feof() semantics. */
+S3_EXPORT int s3stream_handle_eof(const s3stream_handle* handle);
+
+/* Closes the handle and releases its resources. A no-op if handle is NULL. */
+S3_EXPORT void s3stream_handle_close(s3stream_handle* handle);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif

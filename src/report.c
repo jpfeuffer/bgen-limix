@@ -35,13 +35,13 @@ void bgen_perror(char const* err, ...)
     va_end(params);
 }
 
-void bgen_perror_eof(FILE* stream, char const* err, ...)
+void bgen_perror_eof(int is_eof, char const* err, ...)
 {
     va_list params;
     va_start(params, err);
     fprintf(stderr, "ERROR: ");
     vfprintf(stderr, err, params);
-    if (feof(stream))
+    if (is_eof)
         fprintf(stderr, " (%s)", "unexpected end of file");
     else
         fprintf(stderr, " (%s)", strerror(errno));

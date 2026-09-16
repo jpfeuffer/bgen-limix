@@ -12,6 +12,7 @@
 #include "partition.h"
 #include "report.h"
 #include "strdup.h"
+#include "stream.h"
 #include <string.h>
 
 static struct bgen_metafile* metafile_alloc(char const* filepath);
@@ -75,7 +76,9 @@ struct bgen_metafile* bgen_metafile_open(char const* filepath)
 {
     struct bgen_metafile* metafile = metafile_alloc(filepath);
 
-    if (!(metafile->stream = fopen(metafile->filepath, "rb"))) {
+    /* Read-only, so unlike bgen_metafile_create() this also accepts s3://
+     * and http(s):// paths -- the metafile is small enough to stream. */
+    if (!(metafile->stream = bgen_stream_open(metafile->filepath))) {
         bgen_perror("could not open %s", metafile->filepath);
         goto err;
     }
@@ -84,7 +87,7 @@ struct bgen_metafile* bgen_metafile_open(char const* filepath)
     char header[14] = {0}; /* 13 bytes signature + null terminator */
 
     if (fread(header, 13, 1, metafile->stream) < 1) {
-        bgen_perror_eof(metafile->stream, "could not fetch the metafile header");
+        bgen_perror_eof(feof(metafile->stream), "could not fetch the metafile header");
         goto err;
     }
 
@@ -97,25 +100,25 @@ struct bgen_metafile* bgen_metafile_open(char const* filepath)
     }
 
     if (fread(&(metafile->nvariants), sizeof(uint32_t), 1, metafile->stream) < 1) {
-        bgen_perror_eof(metafile->stream,
+        bgen_perror_eof(feof(metafile->stream),
                         "could not read the number of variants from metafile");
         goto err;
     }
 
     if (fread(&(metafile->npartitions), sizeof(uint32_t), 1, metafile->stream) < 1) {
-        bgen_perror_eof(metafile->stream, "could not read the number of partitions");
+        bgen_perror_eof(feof(metafile->stream), "could not read the number of partitions");
         goto err;
     }
 
     if (fread(&(metafile->metadata_block_size), sizeof(uint64_t), 1, metafile->stream) < 1) {
-        bgen_perror_eof(metafile->stream, "could not read the metadata block size");
+        bgen_perror_eof(feof(metafile->stream), "could not read the metadata block size");
         goto err;
     }
 
     /* v05: read the extra all_biallelic byte; v04: mark as unknown (2). */
     if (is_v05) {
         if (fread(&(metafile->all_biallelic), sizeof(uint8_t), 1, metafile->stream) < 1) {
-            bgen_perror_eof(metafile->stream, "could not read all_biallelic flag");
+            bgen_perror_eof(feof(metafile->stream), "could not read all_biallelic flag");
             goto err;
         }
     } else {
@@ -127,7 +130,7 @@ struct bgen_metafile* bgen_metafile_open(char const* filepath)
     for (uint32_t i = 0; i < metafile->npartitions; ++i) {
         uint64_t* ptr = metafile->partition_offset + i;
         if (fread(ptr, sizeof(uint64_t), 1, metafile->stream) < 1) {
-            bgen_perror_eof(metafile->stream, "Could not read partition offsets");
+            bgen_perror_eof(feof(metafile->stream), "Could not read partition offsets");
             goto err;
         }
     }
@@ -189,7 +192,7 @@ struct bgen_partition const* bgen_metafile_read_partition(struct bgen_metafile c
 
     block = malloc(block_size);
     if (fread(block, block_size, 1, stream) < 1) {
-        bgen_perror_eof(stream, "could not read partition");
+        bgen_perror_eof(feof(stream), "could not read partition");
         goto err;
     }
 

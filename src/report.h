@@ -2,7 +2,6 @@
 #define BGEN_REPORT_H
 
 #include <stdarg.h>
-#include <stdio.h>
 
 #if defined(HAVE_ATTR_FORMAT)
 #define ATTR_FORMAT12 __attribute__((format(printf, 1, 2)))
@@ -15,7 +14,9 @@
 void bgen_warning(char const* err, ...) ATTR_FORMAT12;
 void bgen_error(char const* err, ...) ATTR_FORMAT12;
 void bgen_perror(char const* err, ...) ATTR_FORMAT12;
-void bgen_perror_eof(FILE* stream, char const* err, ...) ATTR_FORMAT23;
+/* is_eof: pass feof(stream) / s3stream_handle_eof(handle), already evaluated
+ * by the caller, so this file stays agnostic of which stream type is in use. */
+void bgen_perror_eof(int is_eof, char const* err, ...) ATTR_FORMAT23;
 void bgen_die(char const* err, ...) ATTR_FORMAT12;
 
 #endif

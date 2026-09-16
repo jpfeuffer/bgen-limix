@@ -65,6 +65,57 @@ extern "C" int s3stream_is_remote(const char* path) {
 
 extern "C" const char* s3stream_last_error(void) { return s3stream::g_error; }
 
+/* Backing for s3stream_handle: a lazy, seekable reader that behaves the same
+ * for local paths and remote streams, without ever going through a FILE*
+ * hook -- so unlike s3stream_open(), it has no Windows staging fallback.
+ * `remote` is an s3stream::StreamState* in builds with S3STREAM_ENABLE; it
+ * stays untyped here so the struct layout does not depend on that macro. */
+struct s3stream_handle {
+  FILE* local;
+  void* remote;
+  bool  eof;
+};
+
+namespace s3stream {
+namespace {
+
+/* Avoids fseek()/ftell()'s 2GiB barrier on the local-path branch of the
+ * handle API, mirroring bgen's own bgen_fseek/bgen_ftell (src/io.c). */
+#if (defined(_MSC_VER) && _MSC_VER >= 1400) || defined(__MINGW32__) || defined(__MINGW64__)
+int LocalSeek(FILE* f, int64_t offset, int whence) {
+  return _fseeki64(f, offset, whence);
+}
+int64_t LocalTell(FILE* f) { return _ftelli64(f); }
+#else
+int LocalSeek(FILE* f, int64_t offset, int whence) {
+  return fseeko(f, static_cast<off_t>(offset), whence);
+}
+int64_t LocalTell(FILE* f) { return ftello(f); }
+#endif
+
+/* Shared by both the read/seek/tell functions on the local-path branch: the
+ * remote-path branch is implemented separately per build (see below), since
+ * it needs the StreamState type that only exists with S3STREAM_ENABLE. */
+int64_t LocalRead(s3stream_handle* handle, void* buf, size_t n) {
+  const size_t got = fread(buf, 1, n, handle->local);
+  if (got < n) {
+    if (ferror(handle->local)) {
+      return -1;
+    }
+    handle->eof = true;
+  } else if (n > 0) {
+    handle->eof = false;
+  }
+  return static_cast<int64_t>(got);
+}
+
+}  // namespace
+}  // namespace s3stream
+
+extern "C" int s3stream_handle_eof(const s3stream_handle* handle) {
+  return handle ? (handle->eof ? 1 : 0) : 0;
+}
+
 #ifndef S3STREAM_ENABLE
 
 /* Stub build: the classification helpers above still work, so callers can
@@ -89,6 +140,69 @@ extern "C" FILE* s3stream_open_with_credentials(
     const char* path, const s3stream_credentials* creds) {
   (void)creds;
   return s3stream_open(path);
+}
+
+extern "C" s3stream_handle* s3stream_handle_open_with_credentials(
+    const char* path, const s3stream_credentials* creds) {
+  (void)creds;
+  if (!path) {
+    s3stream::SetError("null path");
+    return nullptr;
+  }
+  if (s3stream_is_remote(path)) {
+    s3stream::SetError(
+        "%s: this build has no S3/HTTP support (rebuild with S3STREAM_ENABLE "
+        "and libcurl)",
+        path);
+    return nullptr;
+  }
+  FILE* f = fopen(path, "rb");
+  if (!f) {
+    s3stream::SetError("%s: %s", path, strerror(errno));
+    return nullptr;
+  }
+  s3stream_handle* handle = new s3stream_handle();
+  handle->local = f;
+  handle->remote = nullptr;
+  handle->eof = false;
+  return handle;
+}
+
+extern "C" s3stream_handle* s3stream_handle_open(const char* path) {
+  return s3stream_handle_open_with_credentials(path, nullptr);
+}
+
+extern "C" int64_t s3stream_handle_read(s3stream_handle* handle, void* buf, size_t n) {
+  if (!handle) {
+    errno = EINVAL;
+    return -1;
+  }
+  return s3stream::LocalRead(handle, buf, n);
+}
+
+extern "C" int s3stream_handle_seek(s3stream_handle* handle, int64_t offset, int whence) {
+  if (!handle) {
+    errno = EINVAL;
+    return -1;
+  }
+  handle->eof = false;
+  return s3stream::LocalSeek(handle->local, offset, whence);
+}
+
+extern "C" int64_t s3stream_handle_tell(const s3stream_handle* handle) {
+  if (!handle) {
+    errno = EINVAL;
+    return -1;
+  }
+  return s3stream::LocalTell(handle->local);
+}
+
+extern "C" void s3stream_handle_close(s3stream_handle* handle) {
+  if (!handle) {
+    return;
+  }
+  fclose(handle->local);
+  delete handle;
 }
 
 #else  // S3STREAM_ENABLE
@@ -652,21 +766,12 @@ bool ProbeObject(StreamState* state) {
   return false;
 }
 
-FILE* OpenStream(StreamState* state) {
-  if (!ProbeObject(state)) {
-    delete state;
-    return nullptr;
-  }
-  FILE* file = MakeStreamFile(state);
-  if (!file) {
-    /* MakeStreamFile owns the state once it is handed over, including on the
-     * failure paths, so there is nothing to free here. */
-    return nullptr;
-  }
-  return file;
-}
+}  // namespace
 
-FILE* OpenRemote(const char* path, const s3stream_credentials* creds) {
+/* Builds and probes a StreamState for `path`, but does not wrap it in a
+ * FILE*. Shared by OpenRemote() (s3stream_open) and the handle API, which
+ * differ only in what they do with the probed state afterwards. */
+StreamState* ProbeRemote(const char* path, const s3stream_credentials* creds) {
   if (s3stream_init() != 0) {
     return nullptr;
   }
@@ -679,7 +784,11 @@ FILE* OpenRemote(const char* path, const s3stream_credentials* creds) {
      * again would invalidate that signature. */
     state->url = path;
     state->sign = false;
-    return OpenStream(state);
+    if (!ProbeObject(state)) {
+      delete state;
+      return nullptr;
+    }
+    return state;
   }
 
   std::string bucket;
@@ -700,11 +809,8 @@ FILE* OpenRemote(const char* path, const s3stream_credentials* creds) {
 
   if (no_sign) {
     state->sign = false;
-    return OpenStream(state);
-  }
-
-  if (creds && creds->access_key_id && *creds->access_key_id &&
-      creds->secret_access_key && *creds->secret_access_key) {
+  } else if (creds && creds->access_key_id && *creds->access_key_id &&
+             creds->secret_access_key && *creds->secret_access_key) {
     state->creds.access_key = creds->access_key_id;
     state->creds.secret_key = creds->secret_access_key;
     if (creds->session_token) {
@@ -716,7 +822,22 @@ FILE* OpenRemote(const char* path, const s3stream_credentials* creds) {
      * buckets and produces a clear 403 otherwise. */
     state->sign = false;
   }
-  return OpenStream(state);
+
+  if (!ProbeObject(state)) {
+    delete state;
+    return nullptr;
+  }
+  return state;
+}
+
+namespace {
+
+FILE* OpenRemote(const char* path, const s3stream_credentials* creds) {
+  StreamState* state = ProbeRemote(path, creds);
+  if (!state) {
+    return nullptr;
+  }
+  return MakeStreamFile(state);
 }
 
 }  // namespace
@@ -762,6 +883,94 @@ extern "C" FILE* s3stream_open_with_credentials(
     return fopen(path, "rb");
   }
   return s3stream::OpenRemote(path, creds);
+}
+
+extern "C" s3stream_handle* s3stream_handle_open_with_credentials(
+    const char* path, const s3stream_credentials* creds) {
+  if (!path) {
+    s3stream::SetError("null path");
+    return nullptr;
+  }
+  s3stream_handle* handle = new s3stream_handle();
+  handle->local = nullptr;
+  handle->remote = nullptr;
+  handle->eof = false;
+
+  if (!s3stream_is_remote(path)) {
+    handle->local = fopen(path, "rb");
+    if (!handle->local) {
+      s3stream::SetError("%s: %s", path, strerror(errno));
+      delete handle;
+      return nullptr;
+    }
+    return handle;
+  }
+
+  handle->remote = s3stream::ProbeRemote(path, creds);
+  if (!handle->remote) {
+    delete handle;
+    return nullptr;
+  }
+  return handle;
+}
+
+extern "C" s3stream_handle* s3stream_handle_open(const char* path) {
+  return s3stream_handle_open_with_credentials(path, nullptr);
+}
+
+extern "C" int64_t s3stream_handle_read(s3stream_handle* handle, void* buf, size_t n) {
+  if (!handle) {
+    errno = EINVAL;
+    return -1;
+  }
+  if (handle->local) {
+    return s3stream::LocalRead(handle, buf, n);
+  }
+  const ssize_t got = s3stream::ReadImpl(
+      static_cast<s3stream::StreamState*>(handle->remote), static_cast<char*>(buf), n);
+  if (got < 0) {
+    return -1;
+  }
+  handle->eof = (got == 0) && (n > 0);
+  return static_cast<int64_t>(got);
+}
+
+extern "C" int s3stream_handle_seek(s3stream_handle* handle, int64_t offset, int whence) {
+  if (!handle) {
+    errno = EINVAL;
+    return -1;
+  }
+  handle->eof = false;
+  if (handle->local) {
+    return s3stream::LocalSeek(handle->local, offset, whence);
+  }
+  return (s3stream::SeekImpl(static_cast<s3stream::StreamState*>(handle->remote),
+                             offset, whence) < 0)
+             ? -1
+             : 0;
+}
+
+extern "C" int64_t s3stream_handle_tell(const s3stream_handle* handle) {
+  if (!handle) {
+    errno = EINVAL;
+    return -1;
+  }
+  if (handle->local) {
+    return s3stream::LocalTell(handle->local);
+  }
+  return static_cast<const s3stream::StreamState*>(handle->remote)->pos;
+}
+
+extern "C" void s3stream_handle_close(s3stream_handle* handle) {
+  if (!handle) {
+    return;
+  }
+  if (handle->local) {
+    fclose(handle->local);
+  } else {
+    delete static_cast<s3stream::StreamState*>(handle->remote);
+  }
+  delete handle;
 }
 
 #endif  // S3STREAM_ENABLE

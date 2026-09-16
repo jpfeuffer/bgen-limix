@@ -154,3 +154,78 @@ jobs:
           BGEN_TEST_MINIO_SECRET: minio_secret
           BGEN_TEST_S3_METAFILE: ${{ github.workspace }}/test/data/example.14bits.bgen.metafile
         run: pixi run -e test pytest python/tests/test_s3_upath.py -v
+
+  test-s3-windows:
+    # Separate from test-s3: GitHub's Windows runners only run Windows
+    # containers by default, so MinIO runs here as a native .exe instead of
+    # via Docker. This job exists specifically to cover bgen_file's lazy,
+    # Range-request-based reads on Windows (s3stream_handle), which used to
+    # be masked by an eager full-object download before any read happened.
+    name: "S3 integration (MinIO, Windows)"
+    runs-on: windows-2025
+
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - uses: prefix-dev/setup-pixi@v0.9.6
+        with:
+          environments: test
+
+      - name: Start MinIO server
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "https://dl.min.io/server/minio/release/windows-amd64/minio.exe" -OutFile "$env:RUNNER_TEMP\minio.exe"
+          New-Item -ItemType Directory -Force -Path "$env:RUNNER_TEMP\miniodata" | Out-Null
+          $env:MINIO_ROOT_USER = "minio_access"
+          $env:MINIO_ROOT_PASSWORD = "minio_secret"
+          Start-Process -FilePath "$env:RUNNER_TEMP\minio.exe" `
+            -ArgumentList "server", "$env:RUNNER_TEMP\miniodata", "--address", ":19000" `
+            -RedirectStandardOutput "$env:RUNNER_TEMP\minio.log" `
+            -RedirectStandardError "$env:RUNNER_TEMP\minio.err.log"
+          for ($i = 0; $i -lt 30; $i++) {
+            try {
+              Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:19000/minio/health/live" | Out-Null
+              break
+            } catch { Start-Sleep -Seconds 1 }
+          }
+
+      - name: Upload test data to MinIO
+        shell: pwsh
+        env:
+          AWS_ACCESS_KEY_ID: minio_access
+          AWS_SECRET_ACCESS_KEY: minio_secret
+          AWS_DEFAULT_REGION: us-east-1
+          AWS_ENDPOINT_URL: http://127.0.0.1:19000
+        run: |
+          pixi run -e test pip install --quiet awscli
+          pixi run -e test aws s3 mb s3://bgen-test --endpoint-url $env:AWS_ENDPOINT_URL
+          pixi run -e test aws s3 cp test/data/example.14bits.bgen s3://bgen-test/example.14bits.bgen --endpoint-url $env:AWS_ENDPOINT_URL
+
+      - name: Configure & build (S3 enabled)
+        run: >
+          pixi run cmake --preset pixi
+          -DCMAKE_BUILD_TYPE=Debug
+          -DBGEN_BUILD_TESTS=ON
+          -DBGEN_BUILD_PYTHON=OFF
+          -DBGEN_ENABLE_S3=ON
+
+      - name: Build
+        run: pixi run cmake --build build --config Debug
+
+      - name: Run C S3 test
+        shell: pwsh
+        env:
+          AWS_ACCESS_KEY_ID: minio_access
+          AWS_SECRET_ACCESS_KEY: minio_secret
+          AWS_DEFAULT_REGION: us-east-1
+          AWS_ENDPOINT_URL: http://127.0.0.1:19000
+          BGEN_TEST_S3_URI: s3://bgen-test/example.14bits.bgen
+          BGEN_TEST_S3_METAFILE: ${{ github.workspace }}\test\data\example.14bits.bgen.metafile
+        run: |
+          # Same DLL-path fix as the test-c Windows step (zlib-ng, zstd, libcurl).
+          # Single-config Ninja generator (see CMakePresets.json), so the
+          # binary lands directly in build\test, no per-config subfolder.
+          $pixi_bin = "${{ github.workspace }}\.pixi\envs\default\Library\bin"
+          $env:PATH = "$pixi_bin;C:\mingw64\bin;$env:PATH"
+          & "${{ github.workspace }}\build\test\test_s3_open.exe"
+

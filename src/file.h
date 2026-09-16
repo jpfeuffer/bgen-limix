@@ -1,17 +1,26 @@
 #ifndef BGEN_FILE_H_PRIVATE
 #define BGEN_FILE_H_PRIVATE
 
+#include "bgen/s3stream.h"
+
 #include <stddef.h>
 #include <stdint.h>
-#include <stdio.h>
 
 struct bgen_file;
 
-FILE*       bgen_file_stream(struct bgen_file const* bgen_file);
-char const* bgen_file_filepath(struct bgen_file const* bgen_file);
-unsigned    bgen_file_layout(struct bgen_file const* bgen_file);
-unsigned    bgen_file_compression(struct bgen_file const* bgen_file);
-int         bgen_file_seek_variants_start(struct bgen_file* bgen_file);
+s3stream_handle* bgen_file_stream(struct bgen_file const* bgen_file);
+char const*      bgen_file_filepath(struct bgen_file const* bgen_file);
+unsigned         bgen_file_layout(struct bgen_file const* bgen_file);
+unsigned         bgen_file_compression(struct bgen_file const* bgen_file);
+int              bgen_file_seek_variants_start(struct bgen_file* bgen_file);
+
+/**
+ * fread-compatible helper over s3stream_handle: behaves like
+ * fread(buf, size, 1, stream) -- returns 1 on a full read of `size` bytes,
+ * 0 otherwise (short read, EOF, or error). Kept item-count-compatible so
+ * call sites' existing `!= 1` / `< 1` checks don't need to change.
+ */
+size_t bgen_stream_fread(s3stream_handle* stream, void* buf, size_t size);
 
 /**
  * Read and decompress the compressed genotype block at the current stream position
