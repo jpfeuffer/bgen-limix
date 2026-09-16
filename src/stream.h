@@ -8,10 +8,11 @@ extern "C" {
 #endif
 
 /**
- * Open a file for reading. Handles both local paths and S3 URIs (s3://bucket/key).
+ * Open a file for reading. Handles local paths, S3 URIs (s3://bucket/key),
+ * and HTTP(S) URLs.
  *
  * For local files, this is equivalent to fopen(path, "rb").
- * For S3 URIs, this returns a FILE* backed by HTTP Range requests,
+ * For S3 URIs and HTTP(S) URLs, this returns a FILE* backed by HTTP Range requests,
  * supporting fread, fseek, ftell, and feof transparently.
  *
  * S3 credentials are read from environment variables:
@@ -32,6 +33,12 @@ FILE* bgen_stream_open(char const* path);
  * @return non-zero if path starts with "s3://".
  */
 int bgen_stream_is_s3(char const* path);
+
+/**
+ * Check if a path is an HTTP(S) URL.
+ * @return non-zero if path starts with "http://" or "https://".
+ */
+int bgen_stream_is_http(char const* path);
 
 #ifdef __cplusplus
 }

@@ -194,7 +194,10 @@ set(_bgen_sources
   src/unzlib.c
   src/unzstd.c
   src/strdup.c
-  src/stream.cpp)
+  src/stream.cpp
+  src/s3stream/s3stream.cc
+  src/s3stream/s3stream_creds.cc
+  src/s3stream/s3stream_http.cc)
 
 add_library(bgen ${_bgen_sources})
 add_library(BGEN::bgen ALIAS bgen)
@@ -222,7 +225,8 @@ target_compile_definitions(
   bgen PRIVATE
   $<$<BOOL:${WIN32}>:_CRT_SECURE_NO_WARNINGS>
   $<$<BOOL:${WIN32}>:_CRT_NONSTDC_NO_DEPRECATE>
-  $<$<BOOL:${BGEN_ENABLE_S3}>:BGEN_S3_SUPPORT>)
+  $<$<BOOL:${BGEN_ENABLE_S3}>:BGEN_S3_SUPPORT>
+  $<$<BOOL:${BGEN_ENABLE_S3}>:S3STREAM_ENABLE>)
 
 target_link_libraries(bgen PUBLIC ${_bgen_zlibng} ATHR::athr)
 if(TARGET zstd::libzstd_shared)

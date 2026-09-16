@@ -29,7 +29,8 @@ class bgen_file:
 
     def __init__(self, filepath: Union[str, "os.PathLike[str]"]):
         s = str(filepath)
-        if s.startswith("s3://"):
+        if s.startswith(("s3://", "http://", "https://")):
+            # Path() collapses "://" to ":/", corrupting these URIs.
             self._filepath = filepath
         else:
             self._filepath = Path(filepath)

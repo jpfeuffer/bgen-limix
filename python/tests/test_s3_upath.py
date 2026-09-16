@@ -22,6 +22,7 @@ MINIO_ENDPOINT = os.environ.get("BGEN_TEST_MINIO_ENDPOINT", "")
 MINIO_ACCESS   = os.environ.get("BGEN_TEST_MINIO_ACCESS", "minio_access")
 MINIO_SECRET   = os.environ.get("BGEN_TEST_MINIO_SECRET", "minio_secret")
 METAFILE       = os.environ.get("BGEN_TEST_S3_METAFILE", "")
+PRESIGNED_URL  = os.environ.get("BGEN_TEST_MINIO_PRESIGNED_URL", "")
 BUCKET_PRIVATE = "bgen-test"
 BUCKET_PUBLIC  = "bgen-public"
 KEY            = "example.14bits.bgen"
@@ -123,3 +124,16 @@ def test_upath_str_preserves_uri():
     """Ensure UPath.__str__ keeps the full s3:// URI (pathlib would mangle it)."""
     path = UPath(f"s3://{BUCKET_PRIVATE}/{KEY}")
     assert str(path) == f"s3://{BUCKET_PRIVATE}/{KEY}"
+
+
+# ── Test 5: presigned URL string (no AWS env credentials) ───────────────────
+
+def test_presigned_url_string(monkeypatch):
+    """A presigned URL should open as a plain HTTP(S) URL without AWS env vars."""
+    if not PRESIGNED_URL:
+        pytest.skip("BGEN_TEST_MINIO_PRESIGNED_URL not set")
+
+    for var in _CRED_VARS:
+        monkeypatch.delenv(var, raising=False)
+
+    _check_bgen(PRESIGNED_URL, METAFILE)

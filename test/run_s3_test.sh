@@ -33,7 +33,7 @@ docker run -d \
   -p "${MINIO_PORT}:9000" \
   -e "MINIO_ROOT_USER=${ACCESS}" \
   -e "MINIO_ROOT_PASSWORD=${SECRET}" \
-  minio/minio server /data
+  quay.io/minio/minio:latest server /data
 
 # ── 2. Wait for MinIO to become healthy ──────────────────────────────────────
 echo "--- Waiting for MinIO to be ready ---"
@@ -70,6 +70,10 @@ aws s3 cp "$BGEN_FILE" "s3://${BUCKET_PUB}/${KEY}" --endpoint-url "$AWS_ENDPOINT
 
 echo "Uploaded: s3://${BUCKET}/${KEY} (private)"
 echo "Uploaded: s3://${BUCKET_PUB}/${KEY} (public)"
+
+# Presigned URL for private object (used by Python test for direct HTTP URL access)
+PRESIGNED_URL="$(aws s3 presign "s3://${BUCKET}/${KEY}" --endpoint-url "$AWS_ENDPOINT_URL" --expires-in 3600)"
+echo "Generated presigned URL for private object."
 
 # ── 4. Build with S3 support ─────────────────────────────────────────────────
 BUILD_DIR="$REPO_ROOT/build-s3-test"
@@ -127,6 +131,7 @@ unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN \
 BGEN_TEST_MINIO_ENDPOINT="http://127.0.0.1:${MINIO_PORT}" \
 BGEN_TEST_MINIO_ACCESS="$ACCESS" \
 BGEN_TEST_MINIO_SECRET="$SECRET" \
+BGEN_TEST_MINIO_PRESIGNED_URL="$PRESIGNED_URL" \
 BGEN_TEST_S3_METAFILE="$REPO_ROOT/test/data/example.14bits.bgen.metafile" \
   pixi run -e test pytest "$REPO_ROOT/python/tests/test_s3_upath.py" -v
 EXIT_CODE=$?
