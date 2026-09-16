@@ -4,7 +4,7 @@
 
 #include "stream.h"
 
-#include "s3stream/s3stream.h"
+#include "bgen/s3stream.h"
 
 #include <stdio.h>
 

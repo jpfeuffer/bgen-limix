@@ -4,7 +4,7 @@
 /* Internals shared between the s3stream translation units.  Not installed;
  * nothing outside this directory should include it. */
 
-#include "s3stream.h"
+#include "bgen/s3stream.h"
 
 #include <stdint.h>
 

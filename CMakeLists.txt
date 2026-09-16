@@ -194,10 +194,7 @@ set(_bgen_sources
   src/unzlib.c
   src/unzstd.c
   src/strdup.c
-  src/stream.cpp
-  src/s3stream/s3stream.cc
-  src/s3stream/s3stream_creds.cc
-  src/s3stream/s3stream_http.cc)
+  src/stream.cpp)
 
 add_library(bgen ${_bgen_sources})
 add_library(BGEN::bgen ALIAS bgen)
@@ -225,8 +222,7 @@ target_compile_definitions(
   bgen PRIVATE
   $<$<BOOL:${WIN32}>:_CRT_SECURE_NO_WARNINGS>
   $<$<BOOL:${WIN32}>:_CRT_NONSTDC_NO_DEPRECATE>
-  $<$<BOOL:${BGEN_ENABLE_S3}>:BGEN_S3_SUPPORT>
-  $<$<BOOL:${BGEN_ENABLE_S3}>:S3STREAM_ENABLE>)
+  $<$<BOOL:${BGEN_ENABLE_S3}>:BGEN_S3_SUPPORT>)
 
 target_link_libraries(bgen PUBLIC ${_bgen_zlibng} ATHR::athr)
 if(TARGET zstd::libzstd_shared)
@@ -235,9 +231,49 @@ elseif(TARGET zstd::libzstd_static)
   target_link_libraries(bgen PUBLIC zstd::libzstd_static)
 endif()
 
+# --- s3stream: S3/HTTP(S) streaming, exposed as its own linkable target so
+# downstream consumers can `target_link_libraries(... BGEN::s3)` directly
+# instead of only getting it bundled inside bgen. ---
+add_library(bgen_s3
+  src/s3stream/s3stream.cc
+  src/s3stream/s3stream_creds.cc
+  src/s3stream/s3stream_http.cc)
+add_library(BGEN::s3 ALIAS bgen_s3)
+
+generate_export_header(
+  bgen_s3
+  BASE_NAME S3
+  INCLUDE_GUARD_NAME BGEN_S3_EXPORT_H
+  EXPORT_FILE_NAME ${CMAKE_CURRENT_BINARY_DIR}/bgen/s3_export.h)
+
+target_include_directories(
+  bgen_s3
+  PUBLIC $<INSTALL_INTERFACE:include>
+         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+         $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>)
+
+set_target_properties(
+  bgen_s3 PROPERTIES
+  EXPORT_NAME s3
+  OUTPUT_NAME bgen_s3
+  VERSION ${PROJECT_VERSION}
+  SOVERSION ${PROJECT_VERSION_MAJOR})
+
+target_compile_definitions(
+  bgen_s3 PRIVATE $<$<BOOL:${BGEN_ENABLE_S3}>:S3STREAM_ENABLE>)
+
+target_compile_options(bgen_s3 PRIVATE
+  $<$<COMPILE_LANGUAGE:CXX>:${BGEN_CXX_WARNING_FLAGS}>)
+
 if(BGEN_ENABLE_S3)
-  target_link_libraries(bgen PRIVATE ${_bgen_curl})
+  target_link_libraries(bgen_s3 PRIVATE ${_bgen_curl})
 endif()
+
+if(MINGW)
+  target_link_options(bgen_s3 INTERFACE "$<LINK_ONLY:-static-libstdc++>" "$<LINK_ONLY:-static-libgcc>")
+endif()
+
+target_link_libraries(bgen PRIVATE BGEN::s3)
 
 # On MinGW, statically link the C++/GCC runtime so test executables (and any
 # downstream user) don't depend on libstdc++-6.dll / libgcc_s_seh-1.dll at
@@ -276,7 +312,7 @@ endif()
 # --- Install ---
 include(GNUInstallDirs)
 
-set(_bgen_install_targets bgen)
+set(_bgen_install_targets bgen bgen_s3)
 if(NOT BGEN_USE_SYSTEM_ZLIB_NG)
   list(APPEND _bgen_install_targets zlib)
 endif()
@@ -296,6 +332,7 @@ install(
 
 install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/bgen/export.h
+              ${CMAKE_CURRENT_BINARY_DIR}/bgen/s3_export.h
         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/bgen)
 
 install(

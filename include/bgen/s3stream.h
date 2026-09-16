@@ -14,6 +14,8 @@
  * callable but reject remote URLs with an error, so callers need no #ifdefs.
  */
 
+#include "bgen/s3_export.h"
+
 #include <stdio.h>
 
 #ifdef __cplusplus
@@ -41,20 +43,20 @@ typedef struct s3stream_credentials {
 /* Path classification.  Always available, including in builds without
  * S3STREAM_ENABLE, so a caller can emit a helpful "rebuild with S3 support"
  * message instead of a confusing file-not-found. */
-int s3stream_is_s3_uri(const char* path);   /* "s3://..."            */
-int s3stream_is_http_url(const char* path); /* "http://", "https://" */
-int s3stream_is_remote(const char* path);   /* either of the above   */
+S3_EXPORT int s3stream_is_s3_uri(const char* path);   /* "s3://..."            */
+S3_EXPORT int s3stream_is_http_url(const char* path); /* "http://", "https://" */
+S3_EXPORT int s3stream_is_remote(const char* path);   /* either of the above   */
 
 /* Initializes libcurl.  Idempotent and thread-safe; returns 0 on success.
  * Calling this explicitly is optional -- the open functions do it for you --
  * but hosts that spawn threads should call it once up front, since the
  * underlying curl_global_init() is not itself thread-safe. */
-int s3stream_init(void);
+S3_EXPORT int s3stream_init(void);
 
 /* Process-wide default: send unsigned requests, for public buckets.  This is
  * the equivalent of `aws s3 --no-sign-request`.  Per-open credentials
  * override it via s3stream_credentials::no_sign_request. */
-void s3stream_set_no_sign_request(int no_sign);
+S3_EXPORT void s3stream_set_no_sign_request(int no_sign);
 
 /* Opens a path for reading.  s3:// URIs and http(s):// URLs are streamed;
  * anything else is passed to fopen(path, "rb"), so this is a drop-in
@@ -71,18 +73,18 @@ void s3stream_set_no_sign_request(int no_sign);
  * The profile is selected by AWS_PROFILE (default "default").
  *
  * Returns NULL on failure; s3stream_last_error() explains why. */
-FILE* s3stream_open(const char* path);
+S3_EXPORT FILE* s3stream_open(const char* path);
 
 /* As s3stream_open(), but uses the supplied credentials instead of the
  * ambient chain, with no effect on any other file in the process.  `creds`
  * must be non-NULL; fields left NULL/0 fall back to ambient defaults. */
-FILE* s3stream_open_with_credentials(const char* path,
+S3_EXPORT FILE* s3stream_open_with_credentials(const char* path,
                                      const s3stream_credentials* creds);
 
 /* Describes the most recent failure on the calling thread.  Never NULL;
  * returns "" when nothing has failed yet.  The buffer is owned by s3stream
  * and is overwritten by the next failing call on the same thread. */
-const char* s3stream_last_error(void);
+S3_EXPORT const char* s3stream_last_error(void);
 
 #ifdef __cplusplus
 } /* extern "C" */
