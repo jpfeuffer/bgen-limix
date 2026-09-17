@@ -390,6 +390,7 @@ bool FetchChunk(StreamState* state, int64_t offset) {
   if ((state->file_size >= 0) && (fetch_end >= state->file_size)) {
     fetch_end = state->file_size - 1;
   }
+  const int64_t want = fetch_end - offset + 1;
 
   RefreshIfExpired(state);
 
@@ -399,28 +400,57 @@ bool FetchChunk(StreamState* state, int64_t offset) {
   Request req = MakeRequest(state);
   req.range = range;
   req.if_match = state->etag;
+  /* Exactly the requested range and not a byte more.  Without this a server
+   * that ignores Range starts streaming the whole object into memory, and the
+   * first sign of trouble is the allocator giving up. */
+  req.max_body = static_cast<size_t>(want);
 
   Response response;
   if (!Perform(req, &response)) {
     return false;
   }
-  if ((response.status != 206) && (response.status != 200)) {
+  /* 200 means the server served the whole entity instead of the range.  That
+   * is only harmless when the range covered the whole object anyway; at any
+   * other offset the bytes would land at the wrong file position, so the data
+   * would be silently wrong rather than merely oversized. */
+  const bool whole_object = (response.status == 200) && (offset == 0) &&
+                            (state->file_size >= 0) &&
+                            (want == state->file_size) &&
+                            !response.body_capped;
+  if ((response.status != 206) && !whole_object) {
+    if (response.status == 200) {
+      SetError("%s: server ignored the Range header at offset %" PRId64,
+               state->display.c_str(), offset);
+      return false;
+    }
     DescribeHttpFailure(state, response);
     return false;
   }
 
-  const int64_t got = static_cast<int64_t>(response.body.size());
-  if (got == 0) {
-    /* The read is positioned before EOF, so an empty body means the response
-     * was truncated.  Reporting it as EOF would hand the caller a silently
-     * short file. */
-    SetError("%s: range request at offset %" PRId64
-             " returned no data (object is %" PRId64 " bytes)",
-             state->display.c_str(), offset, state->file_size);
+  if (response.body_capped) {
+    SetError("%s: server returned more than the %" PRId64
+             " bytes requested at offset %" PRId64,
+             state->display.c_str(), want, offset);
     return false;
   }
 
-  state->buf = response.body;
+  const int64_t got = static_cast<int64_t>(response.body.size());
+  if ((state->file_size >= 0) && (got != want)) {
+    /* The range was clipped to the known object size, so a short body is a
+     * truncated transfer, never EOF.  Returning it as EOF would hand the
+     * caller a silently short file. */
+    SetError("%s: short range response at offset %" PRId64 " (%" PRId64
+             " of %" PRId64 " bytes; object is %" PRId64 " bytes)",
+             state->display.c_str(), offset, got, want, state->file_size);
+    return false;
+  }
+  if (got == 0) {
+    SetError("%s: range request at offset %" PRId64 " returned no data",
+             state->display.c_str(), offset);
+    return false;
+  }
+
+  state->buf.swap(response.body);
   state->buf_start = offset;
   state->buf_end = offset + got;
   return true;
@@ -679,6 +709,32 @@ std::string BuildObjectUrl(const std::string& endpoint,
 
 namespace {
 
+/* Parses a whole-string non-negative decimal size.  strtoll alone accepts a
+ * leading sign and trailing junk, and a negative result would collide with
+ * the file_size < 0 "unknown" sentinel. */
+bool ParseObjectSize(const std::string& text, int64_t* out) {
+  if (text.empty()) {
+    return false;
+  }
+  errno = 0;
+  char* end = nullptr;
+  const long long value = strtoll(text.c_str(), &end, 10);
+  if (errno || !end || (*end != '\0') || (value < 0)) {
+    return false;
+  }
+  *out = static_cast<int64_t>(value);
+  return true;
+}
+
+/* An ETag is echoed back in If-Match on every subsequent range request, so a
+ * value that cannot legally sit in a header must not be stored. */
+void RecordEtag(StreamState* state, const Response& response) {
+  const std::string* etag = response.Header("etag");
+  if (etag && IsSafeHeaderValue(*etag, 512)) {
+    state->etag = *etag;
+  }
+}
+
 /* Determines the object size and current ETag.
  *
  * A HEAD is tried first because it transfers no body.  Presigned URLs are
@@ -689,6 +745,7 @@ bool ProbeObject(StreamState* state) {
 
   Request head = MakeRequest(state);
   head.head = true;
+  head.max_body = 64 * 1024;
   Response response;
   if (!Perform(head, &response)) {
     return false;
@@ -714,12 +771,8 @@ bool ProbeObject(StreamState* state) {
 
   if (response.status == 200) {
     const std::string* length = response.Header("content-length");
-    if (length) {
-      state->file_size = strtoll(length->c_str(), nullptr, 10);
-      const std::string* etag = response.Header("etag");
-      if (etag) {
-        state->etag = *etag;
-      }
+    if (length && ParseObjectSize(*length, &state->file_size)) {
+      RecordEtag(state, response);
       return true;
     }
   }
@@ -746,15 +799,15 @@ bool ProbeObject(StreamState* state) {
     const std::string* range = probe_response.Header("content-range");
     if (range) {
       const size_t slash = range->rfind('/');
-      if (slash != std::string::npos) {
-        state->file_size = strtoll(range->c_str() + slash + 1, nullptr, 10);
-        const std::string* etag = probe_response.Header("etag");
-        if (etag) {
-          state->etag = *etag;
-        }
+      if ((slash != std::string::npos) &&
+          ParseObjectSize(range->substr(slash + 1), &state->file_size)) {
+        RecordEtag(state, probe_response);
         return true;
       }
     }
+    SetError("%s: range response carried no usable Content-Range",
+             state->display.c_str());
+    return false;
   }
   if (probe_response.status == 200) {
     SetError("%s: server ignored the Range header, so it cannot be streamed",
