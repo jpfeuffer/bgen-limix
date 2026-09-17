@@ -9,8 +9,6 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 option(BGEN_BUILD_TESTS "Build C tests" ON)
@@ -27,9 +25,6 @@ include(FetchContent)
 
 # --- S3 support (libcurl for HTTP Range streaming) ---
 if(BGEN_ENABLE_S3)
-  set(CMAKE_CXX_STANDARD 23)
-  set(CMAKE_CXX_STANDARD_REQUIRED ON)
-
   if(BGEN_USE_SYSTEM_CURL)
     find_package(CURL REQUIRED)
     set(_bgen_curl CURL::libcurl)
@@ -199,6 +194,11 @@ set(_bgen_sources
 add_library(bgen ${_bgen_sources})
 add_library(BGEN::bgen ALIAS bgen)
 
+# stream.cpp is the only C++ translation unit here; the rest of the target is
+# C11. A per-target requirement (rather than a global CMAKE_CXX_STANDARD)
+# keeps this scoped to the code that actually needs it.
+target_compile_features(bgen PRIVATE cxx_std_17)
+
 include(GenerateExportHeader)
 generate_export_header(
   bgen
@@ -239,6 +239,10 @@ add_library(bgen_s3
   src/s3stream/s3stream_creds.cc
   src/s3stream/s3stream_http.cc)
 add_library(BGEN::s3 ALIAS bgen_s3)
+
+# PUBLIC: bgen/s3stream.hpp is a public header, so anything that includes it
+# needs the same floor. No feature above C++17 is actually used anywhere here.
+target_compile_features(bgen_s3 PUBLIC cxx_std_17)
 
 generate_export_header(
   bgen_s3
