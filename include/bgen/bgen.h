@@ -28,14 +28,7 @@
 #ifndef BGEN_BGEN_H
 #define BGEN_BGEN_H
 
-/** Major bgen version. */
-#define BGEN_VERSION_MAJOR 4
-/** Minor bgen version. */
-#define BGEN_VERSION_MINOR 7
-/** Minor bgen version. */
-#define BGEN_VERSION_PATCH 2
-/** Bgen version. */
-#define BGEN_VERSION "4.7.2"
+#include "bgen/version.h"
 
 #ifdef __cplusplus
 extern "C"

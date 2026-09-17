@@ -5,6 +5,14 @@ project(
   LANGUAGES C CXX
   DESCRIPTION "C library and Python bindings for the BGEN format (specifications 1.2 and 1.3)")
 
+# Single source of truth for BGEN_VERSION_* (see cmake/version.h.in): keeps
+# include/bgen/bgen.h from being yet another place someone has to remember
+# to bump by hand.
+configure_file(
+  ${CMAKE_CURRENT_SOURCE_DIR}/cmake/version.h.in
+  ${CMAKE_CURRENT_BINARY_DIR}/bgen/version.h
+  @ONLY)
+
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -338,6 +346,7 @@ install(
 install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/bgen/export.h
               ${CMAKE_CURRENT_BINARY_DIR}/bgen/s3_export.h
+              ${CMAKE_CURRENT_BINARY_DIR}/bgen/version.h
         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/bgen)
 
 install(

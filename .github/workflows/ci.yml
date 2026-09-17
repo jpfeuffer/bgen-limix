@@ -7,6 +7,34 @@ on:
     branches: [main]
 
 jobs:
+  check-versions:
+    # Guards against exactly the drift that let CMakeLists.txt/bgen.h fall
+    # behind pixi.toml/pyproject.toml before: bgen/version.h is generated
+    # from CMakeLists.txt (see cmake/version.h.in) so it can't drift on its
+    # own, but pixi.toml, pyproject.toml, and CMakeLists.txt are three
+    # separately-edited files with no language-level way to enforce they
+    # agree. This is the automated check for that; scripts/bump-version.sh
+    # is the intended way to update all three together.
+    name: "Version numbers agree"
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - name: Compare pixi.toml, pyproject.toml, and CMakeLists.txt
+        run: |
+          cmake_version=$(grep -A2 '^project(' CMakeLists.txt | grep -oE 'VERSION [0-9]+\.[0-9]+\.[0-9]+' | awk '{print $2}')
+          pixi_versions=$(grep -oE '^version = "[0-9]+\.[0-9]+\.[0-9]+"' pixi.toml | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | sort -u)
+          pyproject_version=$(grep -oE '^version = "[0-9]+\.[0-9]+\.[0-9]+"' pyproject.toml | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+
+          echo "CMakeLists.txt: $cmake_version"
+          echo "pixi.toml:      $pixi_versions"
+          echo "pyproject.toml: $pyproject_version"
+
+          all_versions=$(printf '%s\n%s\n%s\n' "$cmake_version" "$pixi_versions" "$pyproject_version" | sort -u)
+          if [ "$(echo "$all_versions" | wc -l)" -ne 1 ]; then
+            echo "::error::Version mismatch across pixi.toml/pyproject.toml/CMakeLists.txt. Use scripts/bump-version.sh to update all of them together."
+            exit 1
+          fi
+
   test-c:
     name: "C library (${{ matrix.os }}, ${{ matrix.build_type }})"
     runs-on: ${{ matrix.os }}
