@@ -180,15 +180,30 @@ jobs:
           New-Item -ItemType Directory -Force -Path "$env:RUNNER_TEMP\miniodata" | Out-Null
           $env:MINIO_ROOT_USER = "minio_access"
           $env:MINIO_ROOT_PASSWORD = "minio_secret"
-          Start-Process -FilePath "pixi" `
+
+          # Resolve+cache the package before backgrounding the server, so a
+          # cold conda-forge solve/download doesn't eat into the health-check
+          # timeout below.
+          $pixiExe = (Get-Command pixi).Source
+          & $pixiExe exec --spec minio-server -- minio --version
+
+          Start-Process -FilePath $pixiExe `
             -ArgumentList "exec", "--spec", "minio-server", "--", "minio", "server", "$env:RUNNER_TEMP\miniodata", "--address", ":19000" `
             -RedirectStandardOutput "$env:RUNNER_TEMP\minio.log" `
             -RedirectStandardError "$env:RUNNER_TEMP\minio.err.log"
-          for ($i = 0; $i -lt 30; $i++) {
+
+          $up = $false
+          for ($i = 0; $i -lt 60; $i++) {
             try {
               Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:19000/minio/health/live" | Out-Null
+              $up = $true
               break
             } catch { Start-Sleep -Seconds 1 }
+          }
+          if (-not $up) {
+            Write-Host "--- minio.log ---"; Get-Content "$env:RUNNER_TEMP\minio.log" -ErrorAction SilentlyContinue
+            Write-Host "--- minio.err.log ---"; Get-Content "$env:RUNNER_TEMP\minio.err.log" -ErrorAction SilentlyContinue
+            throw "MinIO did not become healthy within the timeout"
           }
 
       - name: Upload test data to MinIO
