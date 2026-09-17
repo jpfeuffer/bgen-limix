@@ -159,7 +159,7 @@ jobs:
     # Separate from test-s3: GitHub's Windows runners only run Windows
     # containers by default, so MinIO runs here as a native .exe instead of
     # via Docker. This job exists specifically to cover bgen_file's lazy,
-    # Range-request-based reads on Windows (s3stream_handle), which used to
+    # Range-request-based reads on Windows (stream_handle), which used to
     # be masked by an eager full-object download before any read happened.
     name: "S3 integration (MinIO, Windows)"
     runs-on: windows-2025

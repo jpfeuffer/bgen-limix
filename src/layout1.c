@@ -23,7 +23,7 @@ int bgen_layout1_read_header(struct bgen_file* bgen_file, struct bgen_genotype* 
         size_t size = 6 * bgen_file_nsamples(bgen_file);
         chunk = malloc(size);
 
-        s3stream_handle* stream = bgen_file_stream(bgen_file);
+        stream_handle* stream = bgen_file_stream(bgen_file);
         if (bgen_stream_fread(stream, chunk, size) < 1) {
             bgen_free(chunk);
             return 1;
@@ -81,17 +81,17 @@ MAKE_READ_UNPHASED(32, float)
 static char* decompress(struct bgen_file* bgen_file)
 {
     uint32_t compressed_length = 0;
-    s3stream_handle* stream = bgen_file_stream(bgen_file);
+    stream_handle* stream = bgen_file_stream(bgen_file);
 
     if (bgen_stream_fread(stream, &compressed_length, sizeof(compressed_length)) < 1) {
-        bgen_perror_eof(s3stream_handle_eof(stream), "could not read chunk size");
+        bgen_perror_eof(stream_handle_eof(stream), "could not read chunk size");
         return NULL;
     }
 
     char* compressed_chunk = malloc(compressed_length);
 
     if (bgen_stream_fread(stream, compressed_chunk, compressed_length) < 1) {
-        bgen_perror_eof(s3stream_handle_eof(stream), "could not read compressed chunk");
+        bgen_perror_eof(stream_handle_eof(stream), "could not read compressed chunk");
         bgen_free(compressed_chunk);
         return NULL;
     }

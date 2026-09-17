@@ -42,21 +42,21 @@ public:
 
   /* Reads up to n bytes into buf. Returns the number of bytes read (0 at
    * EOF), or -1 on error. */
-  int64_t read(void* buf, size_t n) { return s3stream_handle_read(handle_, buf, n); }
+  int64_t read(void* buf, size_t n) { return stream_handle_read(handle_, buf, n); }
 
   /* whence is SEEK_SET, SEEK_CUR or SEEK_END. Returns 0 on success, -1 on
    * error. */
-  int seek(int64_t offset, int whence) { return s3stream_handle_seek(handle_, offset, whence); }
+  int seek(int64_t offset, int whence) { return stream_handle_seek(handle_, offset, whence); }
 
-  int64_t tell() const { return s3stream_handle_tell(handle_); }
+  int64_t tell() const { return stream_handle_tell(handle_); }
 
-  bool eof() const { return s3stream_handle_eof(handle_) != 0; }
+  bool eof() const { return stream_handle_eof(handle_) != 0; }
 
 private:
-  static s3stream_handle* open_or_throw(const std::string& path,
+  static stream_handle* open_or_throw(const std::string& path,
                                         const s3stream_credentials* creds) {
-    s3stream_handle* handle = creds ? s3stream_handle_open_with_credentials(path.c_str(), creds)
-                                     : s3stream_handle_open(path.c_str());
+    stream_handle* handle = creds ? stream_handle_open_with_credentials(path.c_str(), creds)
+                                     : stream_handle_open(path.c_str());
     if (!handle) {
       throw std::runtime_error(s3stream_last_error());
     }
@@ -65,12 +65,12 @@ private:
 
   void close() {
     if (handle_) {
-      s3stream_handle_close(handle_);
+      stream_handle_close(handle_);
       handle_ = nullptr;
     }
   }
 
-  s3stream_handle* handle_;
+  stream_handle* handle_;
 };
 
 }  // namespace s3stream

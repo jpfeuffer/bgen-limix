@@ -5,11 +5,11 @@
 #include "report.h"
 #include <inttypes.h>
 
-struct bgen_string const* bgen_string_fread(s3stream_handle* restrict stream, size_t length_size)
+struct bgen_string const* bgen_string_fread(stream_handle* restrict stream, size_t length_size)
 {
     uint64_t length = 0;
 
-    if (s3stream_handle_read(stream, &length, length_size) < (int64_t)length_size)
+    if (stream_handle_read(stream, &length, length_size) < (int64_t)length_size)
         return NULL;
 
     if (length == 0)
@@ -17,7 +17,7 @@ struct bgen_string const* bgen_string_fread(s3stream_handle* restrict stream, si
 
     char* data = malloc(sizeof(char) * length);
 
-    if (s3stream_handle_read(stream, data, length) < (int64_t)length) {
+    if (stream_handle_read(stream, data, length) < (int64_t)length) {
         bgen_free(data);
         return NULL;
     }

@@ -65,12 +65,12 @@ extern "C" int s3stream_is_remote(const char* path) {
 
 extern "C" const char* s3stream_last_error(void) { return s3stream::g_error; }
 
-/* Backing for s3stream_handle: a lazy, seekable reader that behaves the same
+/* Backing for stream_handle: a lazy, seekable reader that behaves the same
  * for local paths and remote streams, without ever going through a FILE*
  * hook -- so unlike s3stream_open(), it has no Windows staging fallback.
  * `remote` is an s3stream::StreamState* in builds with S3STREAM_ENABLE; it
  * stays untyped here so the struct layout does not depend on that macro. */
-struct s3stream_handle {
+struct stream_handle {
   FILE* local;
   void* remote;
   bool  eof;
@@ -96,7 +96,7 @@ int64_t LocalTell(FILE* f) { return ftello(f); }
 /* Shared by both the read/seek/tell functions on the local-path branch: the
  * remote-path branch is implemented separately per build (see below), since
  * it needs the StreamState type that only exists with S3STREAM_ENABLE. */
-int64_t LocalRead(s3stream_handle* handle, void* buf, size_t n) {
+int64_t LocalRead(stream_handle* handle, void* buf, size_t n) {
   const size_t got = fread(buf, 1, n, handle->local);
   if (got < n) {
     if (ferror(handle->local)) {
@@ -112,7 +112,7 @@ int64_t LocalRead(s3stream_handle* handle, void* buf, size_t n) {
 }  // namespace
 }  // namespace s3stream
 
-extern "C" int s3stream_handle_eof(const s3stream_handle* handle) {
+extern "C" int stream_handle_eof(const stream_handle* handle) {
   return handle ? (handle->eof ? 1 : 0) : 0;
 }
 
@@ -142,7 +142,7 @@ extern "C" FILE* s3stream_open_with_credentials(
   return s3stream_open(path);
 }
 
-extern "C" s3stream_handle* s3stream_handle_open_with_credentials(
+extern "C" stream_handle* stream_handle_open_with_credentials(
     const char* path, const s3stream_credentials* creds) {
   (void)creds;
   if (!path) {
@@ -161,18 +161,18 @@ extern "C" s3stream_handle* s3stream_handle_open_with_credentials(
     s3stream::SetError("%s: %s", path, strerror(errno));
     return nullptr;
   }
-  s3stream_handle* handle = new s3stream_handle();
+  stream_handle* handle = new stream_handle();
   handle->local = f;
   handle->remote = nullptr;
   handle->eof = false;
   return handle;
 }
 
-extern "C" s3stream_handle* s3stream_handle_open(const char* path) {
-  return s3stream_handle_open_with_credentials(path, nullptr);
+extern "C" stream_handle* stream_handle_open(const char* path) {
+  return stream_handle_open_with_credentials(path, nullptr);
 }
 
-extern "C" int64_t s3stream_handle_read(s3stream_handle* handle, void* buf, size_t n) {
+extern "C" int64_t stream_handle_read(stream_handle* handle, void* buf, size_t n) {
   if (!handle) {
     errno = EINVAL;
     return -1;
@@ -180,7 +180,7 @@ extern "C" int64_t s3stream_handle_read(s3stream_handle* handle, void* buf, size
   return s3stream::LocalRead(handle, buf, n);
 }
 
-extern "C" int s3stream_handle_seek(s3stream_handle* handle, int64_t offset, int whence) {
+extern "C" int stream_handle_seek(stream_handle* handle, int64_t offset, int whence) {
   if (!handle) {
     errno = EINVAL;
     return -1;
@@ -189,7 +189,7 @@ extern "C" int s3stream_handle_seek(s3stream_handle* handle, int64_t offset, int
   return s3stream::LocalSeek(handle->local, offset, whence);
 }
 
-extern "C" int64_t s3stream_handle_tell(const s3stream_handle* handle) {
+extern "C" int64_t stream_handle_tell(const stream_handle* handle) {
   if (!handle) {
     errno = EINVAL;
     return -1;
@@ -197,7 +197,7 @@ extern "C" int64_t s3stream_handle_tell(const s3stream_handle* handle) {
   return s3stream::LocalTell(handle->local);
 }
 
-extern "C" void s3stream_handle_close(s3stream_handle* handle) {
+extern "C" void stream_handle_close(stream_handle* handle) {
   if (!handle) {
     return;
   }
@@ -885,13 +885,13 @@ extern "C" FILE* s3stream_open_with_credentials(
   return s3stream::OpenRemote(path, creds);
 }
 
-extern "C" s3stream_handle* s3stream_handle_open_with_credentials(
+extern "C" stream_handle* stream_handle_open_with_credentials(
     const char* path, const s3stream_credentials* creds) {
   if (!path) {
     s3stream::SetError("null path");
     return nullptr;
   }
-  s3stream_handle* handle = new s3stream_handle();
+  stream_handle* handle = new stream_handle();
   handle->local = nullptr;
   handle->remote = nullptr;
   handle->eof = false;
@@ -914,11 +914,11 @@ extern "C" s3stream_handle* s3stream_handle_open_with_credentials(
   return handle;
 }
 
-extern "C" s3stream_handle* s3stream_handle_open(const char* path) {
-  return s3stream_handle_open_with_credentials(path, nullptr);
+extern "C" stream_handle* stream_handle_open(const char* path) {
+  return stream_handle_open_with_credentials(path, nullptr);
 }
 
-extern "C" int64_t s3stream_handle_read(s3stream_handle* handle, void* buf, size_t n) {
+extern "C" int64_t stream_handle_read(stream_handle* handle, void* buf, size_t n) {
   if (!handle) {
     errno = EINVAL;
     return -1;
@@ -935,7 +935,7 @@ extern "C" int64_t s3stream_handle_read(s3stream_handle* handle, void* buf, size
   return static_cast<int64_t>(got);
 }
 
-extern "C" int s3stream_handle_seek(s3stream_handle* handle, int64_t offset, int whence) {
+extern "C" int stream_handle_seek(stream_handle* handle, int64_t offset, int whence) {
   if (!handle) {
     errno = EINVAL;
     return -1;
@@ -950,7 +950,7 @@ extern "C" int s3stream_handle_seek(s3stream_handle* handle, int64_t offset, int
              : 0;
 }
 
-extern "C" int64_t s3stream_handle_tell(const s3stream_handle* handle) {
+extern "C" int64_t stream_handle_tell(const stream_handle* handle) {
   if (!handle) {
     errno = EINVAL;
     return -1;
@@ -961,7 +961,7 @@ extern "C" int64_t s3stream_handle_tell(const s3stream_handle* handle) {
   return static_cast<const s3stream::StreamState*>(handle->remote)->pos;
 }
 
-extern "C" void s3stream_handle_close(s3stream_handle* handle) {
+extern "C" void stream_handle_close(stream_handle* handle) {
   if (!handle) {
     return;
   }

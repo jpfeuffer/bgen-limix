@@ -44,7 +44,7 @@ struct bgen_variant* bgen_variant_next(struct bgen_file* bgen_file, int* error)
     struct bgen_variant* v = bgen_variant_create();
 
     if (bgen_file_layout(bgen_file) == 1) {
-        if (s3stream_handle_seek(bgen_file_stream(bgen_file), 4, SEEK_CUR))
+        if (stream_handle_seek(bgen_file_stream(bgen_file), 4, SEEK_CUR))
             goto err;
     }
     if (bgen_file_layout(bgen_file) != 2) {
@@ -53,7 +53,7 @@ struct bgen_variant* bgen_variant_next(struct bgen_file* bgen_file, int* error)
     }
 
     if ((v->id = bgen_string_fread(bgen_file_stream(bgen_file), 2)) == NULL) {
-        if (s3stream_handle_eof(bgen_file_stream(bgen_file))) {
+        if (stream_handle_eof(bgen_file_stream(bgen_file))) {
             bgen_variant_destroy(v);
             return NULL;
         }
@@ -62,24 +62,24 @@ struct bgen_variant* bgen_variant_next(struct bgen_file* bgen_file, int* error)
     }
 
     if ((v->rsid = bgen_string_fread(bgen_file_stream(bgen_file), 2)) == NULL) {
-        bgen_perror_eof(s3stream_handle_eof(bgen_file_stream(bgen_file)), "could not read variant rsid");
+        bgen_perror_eof(stream_handle_eof(bgen_file_stream(bgen_file)), "could not read variant rsid");
         goto err;
     }
 
     if ((v->chrom = bgen_string_fread(bgen_file_stream(bgen_file), 2)) == NULL) {
-        bgen_perror_eof(s3stream_handle_eof(bgen_file_stream(bgen_file)), "could not read variant chrom");
+        bgen_perror_eof(stream_handle_eof(bgen_file_stream(bgen_file)), "could not read variant chrom");
         goto err;
     }
 
     if (bgen_stream_fread(bgen_file_stream(bgen_file), &v->position, sizeof(v->position)) != 1) {
-        bgen_perror_eof(s3stream_handle_eof(bgen_file_stream(bgen_file)), "could not read variant position");
+        bgen_perror_eof(stream_handle_eof(bgen_file_stream(bgen_file)), "could not read variant position");
         goto err;
     }
 
     if (bgen_file_layout(bgen_file) == 1)
         v->nalleles = 2;
     else if (bgen_stream_fread(bgen_file_stream(bgen_file), &v->nalleles, sizeof(v->nalleles)) != 1) {
-        bgen_perror_eof(s3stream_handle_eof(bgen_file_stream(bgen_file)), "could not read number of alleles");
+        bgen_perror_eof(stream_handle_eof(bgen_file_stream(bgen_file)), "could not read number of alleles");
         goto err;
     }
 
@@ -89,12 +89,12 @@ struct bgen_variant* bgen_variant_next(struct bgen_file* bgen_file, int* error)
 
     for (uint16_t i = 0; i < v->nalleles; ++i) {
         if ((v->allele_ids[i] = bgen_string_fread(bgen_file_stream(bgen_file), 4)) == NULL) {
-            bgen_perror_eof(s3stream_handle_eof(bgen_file_stream(bgen_file)), "could not read allele id");
+            bgen_perror_eof(stream_handle_eof(bgen_file_stream(bgen_file)), "could not read allele id");
             goto err;
         }
     }
 
-    int64_t offset = s3stream_handle_tell(bgen_file_stream(bgen_file));
+    int64_t offset = stream_handle_tell(bgen_file_stream(bgen_file));
     if (offset < 0) {
         bgen_perror("could not ftell");
         goto err;
@@ -103,11 +103,11 @@ struct bgen_variant* bgen_variant_next(struct bgen_file* bgen_file, int* error)
 
     uint32_t length = 0;
     if (bgen_stream_fread(bgen_file_stream(bgen_file), &length, sizeof(length)) != 1) {
-        bgen_perror_eof(s3stream_handle_eof(bgen_file_stream(bgen_file)), "could not read length to skip");
+        bgen_perror_eof(stream_handle_eof(bgen_file_stream(bgen_file)), "could not read length to skip");
         goto err;
     }
 
-    if (s3stream_handle_seek(bgen_file_stream(bgen_file), length, SEEK_CUR)) {
+    if (stream_handle_seek(bgen_file_stream(bgen_file), length, SEEK_CUR)) {
         bgen_perror("could not jump to the next variant");
         goto err;
     }

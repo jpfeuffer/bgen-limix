@@ -60,7 +60,7 @@ int bgen_layout2_read_header(struct bgen_file* bgen_file, struct bgen_genotype* 
     } else {
         /* Uncompressed path: malloc a local buffer (uncommon in practice). */
         if (bgen_stream_fread(bgen_file_stream(bgen_file), &nsamples, sizeof(nsamples)) < 1) {
-            bgen_perror_eof(s3stream_handle_eof(bgen_file_stream(bgen_file)),
+            bgen_perror_eof(stream_handle_eof(bgen_file_stream(bgen_file)),
                             "could not read number of samples");
             goto err;
         }
@@ -69,7 +69,7 @@ int bgen_layout2_read_header(struct bgen_file* bgen_file, struct bgen_genotype* 
         if (!chunk) { bgen_error("could not malloc uncompressed chunk"); goto err; }
 
         if (bgen_stream_fread(bgen_file_stream(bgen_file), chunk, 6 * nsamples) < 1) {
-            bgen_perror_eof(s3stream_handle_eof(bgen_file_stream(bgen_file)), "could not read chunk");
+            bgen_perror_eof(stream_handle_eof(bgen_file_stream(bgen_file)), "could not read chunk");
             goto err;
         }
 
