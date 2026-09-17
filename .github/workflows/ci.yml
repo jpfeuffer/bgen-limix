@@ -171,8 +171,19 @@ jobs:
         with:
           environments: test
 
-      - name: Start MinIO server
+      - name: Start MinIO, build, and run the C S3 test
+        # GitHub's Windows runners tear down each step's process tree
+        # (job-object kill-on-close) when the step ends, so a MinIO server
+        # backgrounded in its own step is gone before the next step runs.
+        # Everything that needs MinIO alive has to be one step.
         shell: pwsh
+        env:
+          AWS_ACCESS_KEY_ID: minio_access
+          AWS_SECRET_ACCESS_KEY: minio_secret
+          AWS_DEFAULT_REGION: us-east-1
+          AWS_ENDPOINT_URL: http://127.0.0.1:19000
+          BGEN_TEST_S3_URI: s3://bgen-test/example.14bits.bgen
+          BGEN_TEST_S3_METAFILE: ${{ github.workspace }}\test\data\example.14bits.bgen.metafile
         run: |
           # dl.min.io no longer serves binary releases (410 Gone; MinIO
           # archived that distribution channel), so install from conda-forge
@@ -206,43 +217,23 @@ jobs:
             throw "MinIO did not become healthy within the timeout"
           }
 
-      - name: Upload test data to MinIO
-        shell: pwsh
-        env:
-          AWS_ACCESS_KEY_ID: minio_access
-          AWS_SECRET_ACCESS_KEY: minio_secret
-          AWS_DEFAULT_REGION: us-east-1
-          AWS_ENDPOINT_URL: http://127.0.0.1:19000
-        run: |
           pixi run -e test pip install --quiet awscli
           pixi run -e test aws s3 mb s3://bgen-test --endpoint-url $env:AWS_ENDPOINT_URL
+          if ($LASTEXITCODE -ne 0) { throw "aws s3 mb failed" }
           pixi run -e test aws s3 cp test/data/example.14bits.bgen s3://bgen-test/example.14bits.bgen --endpoint-url $env:AWS_ENDPOINT_URL
+          if ($LASTEXITCODE -ne 0) { throw "aws s3 cp failed" }
 
-      - name: Configure & build (S3 enabled)
-        run: >
-          pixi run cmake --preset pixi
-          -DCMAKE_BUILD_TYPE=Debug
-          -DBGEN_BUILD_TESTS=ON
-          -DBGEN_BUILD_PYTHON=OFF
-          -DBGEN_ENABLE_S3=ON
+          pixi run cmake --preset pixi -DCMAKE_BUILD_TYPE=Debug -DBGEN_BUILD_TESTS=ON -DBGEN_BUILD_PYTHON=OFF -DBGEN_ENABLE_S3=ON
+          if ($LASTEXITCODE -ne 0) { throw "cmake configure failed" }
+          pixi run cmake --build build --config Debug
+          if ($LASTEXITCODE -ne 0) { throw "cmake build failed" }
 
-      - name: Build
-        run: pixi run cmake --build build --config Debug
-
-      - name: Run C S3 test
-        shell: pwsh
-        env:
-          AWS_ACCESS_KEY_ID: minio_access
-          AWS_SECRET_ACCESS_KEY: minio_secret
-          AWS_DEFAULT_REGION: us-east-1
-          AWS_ENDPOINT_URL: http://127.0.0.1:19000
-          BGEN_TEST_S3_URI: s3://bgen-test/example.14bits.bgen
-          BGEN_TEST_S3_METAFILE: ${{ github.workspace }}\test\data\example.14bits.bgen.metafile
-        run: |
           # Same DLL-path fix as the test-c Windows step (zlib-ng, zstd, libcurl).
           # Single-config Ninja generator (see CMakePresets.json), so the
           # binary lands directly in build\test, no per-config subfolder.
           $pixi_bin = "${{ github.workspace }}\.pixi\envs\default\Library\bin"
           $env:PATH = "$pixi_bin;C:\mingw64\bin;$env:PATH"
           & "${{ github.workspace }}\build\test\test_s3_open.exe"
+          if ($LASTEXITCODE -ne 0) { throw "test_s3_open failed" }
+
 
