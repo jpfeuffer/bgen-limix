@@ -27,6 +27,18 @@ BGEN_EXPORT struct bgen_file* bgen_file_open(char const* filepath);
  * @param bgen_file Bgen file handler.
  */
 BGEN_EXPORT void bgen_file_close(struct bgen_file const* bgen_file);
+/** Get the file's layout version.
+ *
+ * @param bgen_file Bgen file handler.
+ * @return `1` for Layout 1 or `2` for Layout 2.
+ */
+BGEN_EXPORT unsigned bgen_file_layout(struct bgen_file const* bgen_file);
+/** Get the file's genotype block compression method.
+ *
+ * @param bgen_file Bgen file handler.
+ * @return `0` for no compression, `1` for zlib, `2` for zstd.
+ */
+BGEN_EXPORT unsigned bgen_file_compression(struct bgen_file const* bgen_file);
 /** Get the number of samples.
  *
  * @param bgen_file Bgen file handler.

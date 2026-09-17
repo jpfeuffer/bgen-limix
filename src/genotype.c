@@ -74,3 +74,8 @@ unsigned bgen_genotype_ncombs(struct bgen_genotype const* genotype)
 }
 
 bool bgen_genotype_phased(struct bgen_genotype const* genotype) { return genotype->phased; }
+
+uint8_t bgen_genotype_nbits(struct bgen_genotype const* genotype)
+{
+    return (genotype->layout == 1) ? 16 : genotype->nbits;
+}

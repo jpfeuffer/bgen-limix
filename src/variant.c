@@ -1,5 +1,6 @@
 #include "bgen/variant.h"
 #include "bgen/bstring.h"
+#include "bgen/file.h"
 #include "bgen/s3stream.h"
 #include "bstring.h"
 #include "file.h"

@@ -38,6 +38,8 @@ File
 
 .. doxygenfunction:: bgen_file_open
 .. doxygenfunction:: bgen_file_close
+.. doxygenfunction:: bgen_file_layout
+.. doxygenfunction:: bgen_file_compression
 .. doxygenfunction:: bgen_file_nsamples
 .. doxygenfunction:: bgen_file_nvariants
 .. doxygenfunction:: bgen_file_contain_samples
@@ -59,6 +61,7 @@ Genotype
 .. doxygenfunction:: bgen_genotype_max_ploidy
 .. doxygenfunction:: bgen_genotype_ncombs
 .. doxygenfunction:: bgen_genotype_phased
+.. doxygenfunction:: bgen_genotype_nbits
 .. doxygenstruct:: bgen_genotype
 
 Metafile

@@ -117,5 +117,14 @@ BGEN_EXPORT unsigned bgen_genotype_ncombs(struct bgen_genotype const* genotype);
  * @return `1` for phased genotype; `0` otherwise.
  */
 BGEN_EXPORT bool bgen_genotype_phased(struct bgen_genotype const* genotype);
+/** Get the number of bits used to encode each probability.
+ *
+ * Layout 2 stores this explicitly per variant (1-32). Layout 1 always uses a
+ * fixed 16-bit encoding, so this returns `16` for it regardless of variant.
+ *
+ * @param genotype Variant genotype handler.
+ * @return Number of bits per probability.
+ */
+BGEN_EXPORT uint8_t bgen_genotype_nbits(struct bgen_genotype const* genotype);
 
 #endif

@@ -1,4 +1,5 @@
 #include "layout2.h"
+#include "bgen/file.h"
 #include "bmath.h"
 #include "file.h"
 #include "free.h"
