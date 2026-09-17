@@ -31,11 +31,11 @@
 /** Major bgen version. */
 #define BGEN_VERSION_MAJOR 4
 /** Minor bgen version. */
-#define BGEN_VERSION_MINOR 1
+#define BGEN_VERSION_MINOR 7
 /** Minor bgen version. */
-#define BGEN_VERSION_PATCH 1
+#define BGEN_VERSION_PATCH 2
 /** Bgen version. */
-#define BGEN_VERSION "4.1.1"
+#define BGEN_VERSION "4.7.2"
 
 #ifdef __cplusplus
 extern "C"

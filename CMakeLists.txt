@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
 project(
   bgen
-  VERSION 4.7.3
+  VERSION 4.7.2
   LANGUAGES C CXX
   DESCRIPTION "C library and Python bindings for the BGEN format (specifications 1.2 and 1.3)")
 
