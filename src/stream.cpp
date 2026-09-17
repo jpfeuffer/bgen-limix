@@ -24,23 +24,3 @@ FILE* bgen_stream_open(char const* path)
 
 } /* extern "C" */
 
-#ifdef BGEN_S3_SUPPORT
-
-#include "s3stream/s3stream_internal.h"
-
-/* Test hook: lets the C test suite observe the credential chain without
- * reaching into s3stream's internals. */
-extern "C" int bgen_test_resolve_credentials(char* access, size_t access_len,
-                                             char* secret, size_t secret_len,
-                                             char* token, size_t token_len)
-{
-    s3stream::Credentials creds;
-    if (!s3stream::ResolveCredentials(&creds))
-        return 0;
-    snprintf(access, access_len, "%s", creds.access_key.c_str());
-    snprintf(secret, secret_len, "%s", creds.secret_key.c_str());
-    snprintf(token, token_len, "%s", creds.session_token.c_str());
-    return 1;
-}
-
-#endif /* BGEN_S3_SUPPORT */

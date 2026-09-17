@@ -82,7 +82,7 @@ if(BGEN_ENABLE_S3)
 
   # Credential-chain unit test (no network required)
   add_executable(test_credentials_file src/credentials_file.c)
-  target_link_libraries(test_credentials_file PRIVATE BGEN::bgen)
+  target_link_libraries(test_credentials_file PRIVATE BGEN::bgen BGEN::s3)
   target_compile_options(test_credentials_file PRIVATE
     $<$<COMPILE_LANGUAGE:C>:${BGEN_C_WARNING_FLAGS}>)
   target_compile_definitions(test_credentials_file PRIVATE BGEN_S3_SUPPORT)

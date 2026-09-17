@@ -1,6 +1,6 @@
 /* Unit tests for the shared-credentials-file provider.
  *
- * Uses bgen_test_resolve_credentials() (compiled into libbgen when
+ * Uses s3stream_test_resolve_credentials() (compiled into bgen_s3 when
  * BGEN_ENABLE_S3=ON) to exercise the credential chain without a real
  * S3 connection.
  *
@@ -42,10 +42,10 @@ static int bgen_mkstemp(char* buf, size_t bufsz)
 #  include <unistd.h>
 #endif
 
-/* Forward declaration — symbol is provided by libbgen when S3 is enabled. */
-extern int bgen_test_resolve_credentials(char* access, size_t access_len,
-                                         char* secret, size_t secret_len,
-                                         char* token,  size_t token_len);
+/* Forward declaration -- symbol is provided by bgen_s3 when S3 is enabled. */
+extern int s3stream_test_resolve_credentials(char* access, size_t access_len,
+                                             char* secret, size_t secret_len,
+                                             char* token,  size_t token_len);
 
 static void write_creds_file(const char* path)
 {
@@ -106,7 +106,7 @@ int main(void)
     char access[256], secret[256], token[256];
 
     /* ── Test 1: default profile ────────────────────────────────────────── */
-    int found = bgen_test_resolve_credentials(
+    int found = s3stream_test_resolve_credentials(
         access, sizeof access, secret, sizeof secret, token, sizeof token);
     cass_cond(found == 1);
     cass_cond(strcmp(access, "AKIATEST0000000001") == 0);
@@ -115,7 +115,7 @@ int main(void)
 
     /* ── Test 2: named profile via AWS_PROFILE ──────────────────────────── */
     setenv("AWS_PROFILE", "myprofile", 1);
-    found = bgen_test_resolve_credentials(
+    found = s3stream_test_resolve_credentials(
         access, sizeof access, secret, sizeof secret, token, sizeof token);
     cass_cond(found == 1);
     cass_cond(strcmp(access, "AKIATEST0000000002") == 0);
@@ -125,7 +125,7 @@ int main(void)
 
     /* ── Test 3: non-existent profile → no credentials ──────────────────── */
     setenv("AWS_PROFILE", "doesnotexist", 1);
-    found = bgen_test_resolve_credentials(
+    found = s3stream_test_resolve_credentials(
         access, sizeof access, secret, sizeof secret, token, sizeof token);
     cass_cond(found == 0);
     unsetenv("AWS_PROFILE");
@@ -133,7 +133,7 @@ int main(void)
     /* ── Test 4: env-var provider takes precedence over file ────────────── */
     setenv("AWS_ACCESS_KEY_ID",     "ENVKEY",    1);
     setenv("AWS_SECRET_ACCESS_KEY", "ENVSECRET", 1);
-    found = bgen_test_resolve_credentials(
+    found = s3stream_test_resolve_credentials(
         access, sizeof access, secret, sizeof secret, token, sizeof token);
     cass_cond(found == 1);
     cass_cond(strcmp(access, "ENVKEY")    == 0);

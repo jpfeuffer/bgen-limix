@@ -237,7 +237,8 @@ endif()
 add_library(bgen_s3
   src/s3stream/s3stream.cc
   src/s3stream/s3stream_creds.cc
-  src/s3stream/s3stream_http.cc)
+  src/s3stream/s3stream_http.cc
+  src/s3stream/s3stream_test_hooks.cc)
 add_library(BGEN::s3 ALIAS bgen_s3)
 
 # PUBLIC: bgen/s3stream.hpp is a public header, so anything that includes it
