@@ -174,12 +174,14 @@ jobs:
       - name: Start MinIO server
         shell: pwsh
         run: |
-          Invoke-WebRequest -Uri "https://dl.min.io/server/minio/release/windows-amd64/minio.exe" -OutFile "$env:RUNNER_TEMP\minio.exe"
+          # dl.min.io no longer serves binary releases (410 Gone; MinIO
+          # archived that distribution channel), so install from conda-forge
+          # via pixi instead of downloading minio.exe directly.
           New-Item -ItemType Directory -Force -Path "$env:RUNNER_TEMP\miniodata" | Out-Null
           $env:MINIO_ROOT_USER = "minio_access"
           $env:MINIO_ROOT_PASSWORD = "minio_secret"
-          Start-Process -FilePath "$env:RUNNER_TEMP\minio.exe" `
-            -ArgumentList "server", "$env:RUNNER_TEMP\miniodata", "--address", ":19000" `
+          Start-Process -FilePath "pixi" `
+            -ArgumentList "exec", "--spec", "minio-server", "--", "minio", "server", "$env:RUNNER_TEMP\miniodata", "--address", ":19000" `
             -RedirectStandardOutput "$env:RUNNER_TEMP\minio.log" `
             -RedirectStandardError "$env:RUNNER_TEMP\minio.err.log"
           for ($i = 0; $i -lt 30; $i++) {
