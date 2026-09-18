@@ -3,7 +3,14 @@
 
 /* Minimal, dependency-free progress bar: percentage, rate-derived ETA, no
  * external library. Replaces almosthere (athr), whose CMake packaging kept
- * breaking downstream consumers with dangling internal link targets. */
+ * breaking downstream consumers with dangling internal link targets.
+ *
+ * isatty()/fileno() are POSIX, not C11; the -std=c11 with extensions off
+ * this project builds under hides them on glibc unless a feature-test macro
+ * asks for them, which has to be defined before the *first* standard header
+ * anywhere in the translation unit -- io.h, included earlier by every
+ * caller of this header, already pulls in <stdio.h>, so it is set as a
+ * compile definition on the bgen target instead (see CMakeLists.txt). */
 
 #include <inttypes.h>
 #include <stdint.h>
@@ -30,6 +37,8 @@ struct bgen_progress
     int         is_tty;
 };
 
+#define BGEN_PROGRESS_BAR_WIDTH 24
+
 static void bgen_progress_render(struct bgen_progress const* p, time_t now)
 {
     double elapsed = (double)(now - p->start);
@@ -49,15 +58,17 @@ static void bgen_progress_render(struct bgen_progress const* p, time_t now)
         snprintf(eta, sizeof(eta), "00:00:00");
     }
 
-    int const width  = 24;
-    int const filled = (int)(frac * width);
-    char      bar[width + 1];
+    /* A #define, not a local const int: MSVC's C compiler has no VLA
+     * support, and `char bar[width + 1]` with a runtime-valued (even if
+     * const-qualified) width is a VLA in C, unlike C++. */
+    int const filled = (int)(frac * BGEN_PROGRESS_BAR_WIDTH);
+    char      bar[BGEN_PROGRESS_BAR_WIDTH + 1];
     int       i = 0;
     for (; i < filled; ++i)
         bar[i] = '#';
-    for (; i < width; ++i)
+    for (; i < BGEN_PROGRESS_BAR_WIDTH; ++i)
         bar[i] = '-';
-    bar[width] = '\0';
+    bar[BGEN_PROGRESS_BAR_WIDTH] = '\0';
 
     fprintf(stderr, "%s%s [%s] %5.1f%% (%" PRIu64 "/%" PRIu64 ") ETA %s%s",
             p->is_tty ? "\r" : "", p->label, bar, frac * 100.0, p->done, p->total, eta,

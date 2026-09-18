@@ -171,6 +171,15 @@ add_library(BGEN::bgen ALIAS bgen)
 # keeps this scoped to the code that actually needs it.
 target_compile_features(bgen PRIVATE cxx_std_17)
 
+# -std=c11 with extensions off hides isatty()/fileno() on glibc (they are
+# POSIX, not C11) unless asked for explicitly, which progress.h needs for its
+# terminal check. Has to be a compile definition rather than an in-header
+# #define: io.h, included before progress.h by every caller, already pulls in
+# <stdio.h>, so by then it would be too late in that translation unit.
+if(UNIX AND NOT APPLE)
+  target_compile_definitions(bgen PRIVATE _POSIX_C_SOURCE=200809L)
+endif()
+
 include(GenerateExportHeader)
 generate_export_header(
   bgen
