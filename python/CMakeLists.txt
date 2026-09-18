@@ -54,7 +54,9 @@ set_property(CACHE BGEN_NANOBIND_BACKEND PROPERTY STRINGS shared private)
 
 if(BGEN_NANOBIND_BACKEND STREQUAL "private")
   nanobind_add_backend(_bgen_nb_backend)
-  nanobind_add_module(_core STABLE_ABI BACKEND_MODULE _bgen_nb_backend ${CMAKE_CURRENT_SOURCE_DIR}/bindings.cpp)
+  # BACKEND_MODULE must match the module's actual import path: it's installed
+  # inside the cbgen package (DESTINATION cbgen below), not at the top level.
+  nanobind_add_module(_core STABLE_ABI BACKEND_MODULE cbgen._bgen_nb_backend ${CMAKE_CURRENT_SOURCE_DIR}/bindings.cpp)
   install(TARGETS _bgen_nb_backend LIBRARY DESTINATION cbgen)
 else()
   nanobind_add_module(_core STABLE_ABI BACKEND_MODULE nanobind_backend ${CMAKE_CURRENT_SOURCE_DIR}/bindings.cpp)
