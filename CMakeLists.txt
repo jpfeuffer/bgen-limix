@@ -137,7 +137,7 @@ if(BGEN_USE_SYSTEM_ATHR)
   if(TARGET ATHR::athr)
     get_target_property(_athr_libs ATHR::athr INTERFACE_LINK_LIBRARIES)
     if(_athr_libs)
-      list(FILTER _athr_libs EXCLUDE REGEX "Xcode.*\\.tbd$")
+      list(FILTER _athr_libs EXCLUDE REGEX "Xcode.*\\.(tbd|dylib|a)$")
       set_target_properties(ATHR::athr PROPERTIES INTERFACE_LINK_LIBRARIES "${_athr_libs}")
     endif()
     if(APPLE)
@@ -162,6 +162,29 @@ else()
   # PTHREAD_MUTEX_NORMAL, which is portable and semantically identical.
   if(UNIX AND NOT APPLE)
     target_compile_definitions(athr PRIVATE C11THREADS_NO_TIMED_MUTEX)
+  endif()
+
+  # almosthere links athr against its own LIBRT::LIBRT (from its bundled
+  # cmake/FindLibRt.cmake), an imported target that exists only inside its
+  # own CMake scope. bgen re-exports athr as part of its own install set,
+  # which carries that reference into the generated bgen-targets.cmake, but
+  # not the target itself, so a downstream consumer's configure fails with
+  # "the target was not found". Same shape of bug as the system-athr Xcode
+  # path above; fixed the same way, by replacing it with the real library
+  # before athr is ever exported.
+  if(UNIX AND NOT APPLE)
+    get_target_property(_athr_libs athr INTERFACE_LINK_LIBRARIES)
+    if(_athr_libs)
+      list(FIND _athr_libs "LIBRT::LIBRT" _librt_idx)
+      if(NOT _librt_idx EQUAL -1)
+        find_library(BGEN_LIBRT_LIBRARY rt)
+        list(REMOVE_AT _athr_libs ${_librt_idx})
+        if(BGEN_LIBRT_LIBRARY)
+          list(APPEND _athr_libs ${BGEN_LIBRT_LIBRARY})
+        endif()
+        set_target_properties(athr PROPERTIES INTERFACE_LINK_LIBRARIES "${_athr_libs}")
+      endif()
+    endif()
   endif()
 endif()
 
