@@ -24,7 +24,6 @@ option(BGEN_ENABLE_SANITIZERS "Enable sanitizers (Debug builds)" OFF)
 option(BGEN_ENABLE_S3 "Enable S3 streaming support (requires libcurl, OpenSSL)" ON)
 option(BGEN_USE_SYSTEM_ZLIB_NG "Use system-provided zlib-ng (native API)" ON)
 option(BGEN_USE_SYSTEM_ZSTD "Use system-provided zstd" ON)
-option(BGEN_USE_SYSTEM_ATHR "Use system-provided athr (almosthere)" ON)
 
 
 option(BGEN_USE_SYSTEM_CURL "Use system-provided libcurl" ON)
@@ -130,64 +129,6 @@ else()
   endif()
 endif()
 
-# --- athr (almosthere) ---
-if(BGEN_USE_SYSTEM_ATHR)
-  find_package(athr REQUIRED)
-  # Fix broken conda-forge athr package that hardcodes Xcode SDK paths
-  if(TARGET ATHR::athr)
-    get_target_property(_athr_libs ATHR::athr INTERFACE_LINK_LIBRARIES)
-    if(_athr_libs)
-      list(FILTER _athr_libs EXCLUDE REGEX "Xcode.*\\.(tbd|dylib|a)$")
-      set_target_properties(ATHR::athr PROPERTIES INTERFACE_LINK_LIBRARIES "${_athr_libs}")
-    endif()
-    if(APPLE)
-      find_library(CURSES_LIBRARY curses)
-      if(CURSES_LIBRARY)
-        target_link_libraries(ATHR::athr INTERFACE ${CURSES_LIBRARY})
-      endif()
-    endif()
-  endif()
-else()
-  message(STATUS "Fetching almosthere via FetchContent ...")
-  FetchContent_Declare(almosthere
-    GIT_REPOSITORY https://github.com/horta/almosthere.git
-    GIT_TAG v2.0.2
-    GIT_SHALLOW TRUE)
-  FetchContent_MakeAvailable(almosthere)
-  # ATHR::athr alias is defined by almosthere's CMakeLists.txt
-  # PTHREAD_MUTEX_TIMED_NP is a GNU non-portable extension. almosthere v2.0.2
-  # compiles with strict POSIX flags (-D_POSIX_C_SOURCE -D_XOPEN_SOURCE) that
-  # suppress it on some Linux/aarch64 toolchains (e.g. manylinux with Python 3.14).
-  # Setting C11THREADS_NO_TIMED_MUTEX makes c11threads.h define it as
-  # PTHREAD_MUTEX_NORMAL, which is portable and semantically identical.
-  if(UNIX AND NOT APPLE)
-    target_compile_definitions(athr PRIVATE C11THREADS_NO_TIMED_MUTEX)
-  endif()
-
-  # almosthere links athr against its own LIBRT::LIBRT (from its bundled
-  # cmake/FindLibRt.cmake), an imported target that exists only inside its
-  # own CMake scope. bgen re-exports athr as part of its own install set,
-  # which carries that reference into the generated bgen-targets.cmake, but
-  # not the target itself, so a downstream consumer's configure fails with
-  # "the target was not found". Same shape of bug as the system-athr Xcode
-  # path above; fixed the same way, by replacing it with the real library
-  # before athr is ever exported.
-  if(UNIX AND NOT APPLE)
-    get_target_property(_athr_libs athr INTERFACE_LINK_LIBRARIES)
-    if(_athr_libs)
-      list(FIND _athr_libs "LIBRT::LIBRT" _librt_idx)
-      if(NOT _librt_idx EQUAL -1)
-        find_library(BGEN_LIBRT_LIBRARY rt)
-        list(REMOVE_AT _athr_libs ${_librt_idx})
-        if(BGEN_LIBRT_LIBRARY)
-          list(APPEND _athr_libs ${BGEN_LIBRT_LIBRARY})
-        endif()
-        set_target_properties(athr PROPERTIES INTERFACE_LINK_LIBRARIES "${_athr_libs}")
-      endif()
-    endif()
-  endif()
-endif()
-
 # --- Compiler warnings ---
 if(MSVC)
   set(BGEN_C_WARNING_FLAGS /W4)
@@ -255,7 +196,7 @@ target_compile_definitions(
   $<$<BOOL:${WIN32}>:_CRT_NONSTDC_NO_DEPRECATE>
   $<$<BOOL:${BGEN_ENABLE_S3}>:BGEN_S3_SUPPORT>)
 
-target_link_libraries(bgen PUBLIC ${_bgen_zlibng} ATHR::athr)
+target_link_libraries(bgen PUBLIC ${_bgen_zlibng})
 if(TARGET zstd::libzstd_shared)
   target_link_libraries(bgen PUBLIC zstd::libzstd_shared)
 elseif(TARGET zstd::libzstd_static)
@@ -354,9 +295,6 @@ if(NOT BGEN_USE_SYSTEM_ZLIB_NG)
 endif()
 if(NOT BGEN_USE_SYSTEM_ZSTD)
   list(APPEND _bgen_install_targets libzstd_static)
-endif()
-if(NOT BGEN_USE_SYSTEM_ATHR)
-  list(APPEND _bgen_install_targets athr)
 endif()
 
 install(

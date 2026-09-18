@@ -8,28 +8,6 @@ endif()
 if(@BGEN_USE_SYSTEM_ZSTD@)
   find_dependency(zstd)
 endif()
-if(@BGEN_USE_SYSTEM_ATHR@)
-  find_dependency(athr)
-  # The conda-forge athr package bakes its build machine's Xcode SDK path into
-  # ATHR::athr, which then fails to resolve anywhere else. The same repair is
-  # applied in bgen's own CMakeLists, but find_dependency() re-imports the
-  # target in the consumer's scope, so it has to be repeated here.
-  if(TARGET ATHR::athr)
-    get_target_property(_bgen_athr_libs ATHR::athr INTERFACE_LINK_LIBRARIES)
-    if(_bgen_athr_libs)
-      list(FILTER _bgen_athr_libs EXCLUDE REGEX "Xcode.*\\.tbd$")
-      set_target_properties(ATHR::athr PROPERTIES
-        INTERFACE_LINK_LIBRARIES "${_bgen_athr_libs}")
-    endif()
-    if(APPLE)
-      find_library(BGEN_CURSES_LIBRARY curses)
-      if(BGEN_CURSES_LIBRARY)
-        set_property(TARGET ATHR::athr APPEND PROPERTY
-          INTERFACE_LINK_LIBRARIES "${BGEN_CURSES_LIBRARY}")
-      endif()
-    endif()
-  endif()
-endif()
 if(@BGEN_ENABLE_S3@ AND @BGEN_USE_SYSTEM_CURL@)
   find_dependency(CURL)
   find_dependency(OpenSSL)

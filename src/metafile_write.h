@@ -1,13 +1,13 @@
 #ifndef BGEN_METAFILE_WRITE_H
 #define BGEN_METAFILE_WRITE_H
 
-#include "athr/athr.h"
 #include "bgen/bstring.h"
 #include "bgen/variant.h"
 #include "bmath.h"
 #include "bstring.h"
 #include "io.h"
 #include "metafile.h"
+#include "progress.h"
 #include "report.h"
 #include "variant.h"
 #include <inttypes.h>
@@ -99,14 +99,9 @@ static uint64_t write_metafile_metadata_block(FILE* stream, uint64_t* poffset,
                                               struct bgen_file* bgen, int verbose,
                                               uint8_t* out_all_biallelic)
 {
-    struct athr* at = NULL;
-    if (verbose) {
-        at = athr_create((long)nvariants, "Writing variants", ATHR_BAR | ATHR_ETA);
-        if (at == NULL) {
-            bgen_error("could not create a progress bar");
-            goto err;
-        }
-    }
+    struct bgen_progress progress;
+    if (verbose)
+        bgen_progress_start(&progress, nvariants, "Writing variants");
 
     uint64_t i = 0, j = 0;
     int      error = 0;
@@ -136,8 +131,8 @@ static uint64_t write_metafile_metadata_block(FILE* stream, uint64_t* poffset,
         if (size == 0)
             goto err;
 
-        if (at)
-            athr_consume(at, 1);
+        if (verbose)
+            bgen_progress_update(&progress, 1);
 
         /* true for the first variant of every partition */
         if (i % part_size == 0) {
@@ -151,7 +146,7 @@ static uint64_t write_metafile_metadata_block(FILE* stream, uint64_t* poffset,
     }
 
     if (verbose)
-        athr_finish(at);
+        bgen_progress_finish(&progress);
 
     if (out_all_biallelic)
         *out_all_biallelic = (uint8_t)(any_multiallelic ? 0 : 1);

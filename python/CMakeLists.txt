@@ -10,30 +10,12 @@ find_package(bgen QUIET)
 
 if(TARGET BGEN::bgen)
   message(STATUS "cbgen: using pre-built bgen (BGEN::bgen target found)")
-  # The conda-forge athr package hardcodes Xcode SDK paths in its link
-  # interface (e.g. .../MacOSX11.0.sdk/usr/lib/libcurses.tbd). When we reuse a
-  # pre-built bgen, ATHR::athr is pulled in transitively, so apply the same
-  # fix the C build uses.
-  if(TARGET ATHR::athr)
-    get_target_property(_athr_libs ATHR::athr INTERFACE_LINK_LIBRARIES)
-    if(_athr_libs)
-      list(FILTER _athr_libs EXCLUDE REGEX "Xcode.*\\.(tbd|dylib|a)$")
-      set_target_properties(ATHR::athr PROPERTIES INTERFACE_LINK_LIBRARIES "${_athr_libs}")
-    endif()
-    if(APPLE)
-      find_library(CURSES_LIBRARY curses)
-      if(CURSES_LIBRARY)
-        target_link_libraries(ATHR::athr INTERFACE ${CURSES_LIBRARY})
-      endif()
-    endif()
-  endif()
 else()
   message(STATUS "cbgen: no pre-built bgen found, building C library from source")
   # Self-contained wheel: vendor all C dependencies.
   set(BGEN_BUILD_TESTS OFF CACHE BOOL "" FORCE)
   set(BGEN_USE_SYSTEM_ZLIB_NG OFF CACHE BOOL "" FORCE)
   set(BGEN_USE_SYSTEM_ZSTD OFF CACHE BOOL "" FORCE)
-  set(BGEN_USE_SYSTEM_ATHR OFF CACHE BOOL "" FORCE)
   set(BGEN_USE_SYSTEM_CURL OFF CACHE BOOL "" FORCE)
   add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/.." "${CMAKE_BINARY_DIR}/_bgen")
 endif()
