@@ -23,8 +23,8 @@ classifiers = [
 dependencies = [
     "numpy>=2.0",
     "pooch>=1.6",
-    "nanobind-backend>=1.0",
 ]
+dynamic = ["dependencies"]
 
 [project.urls]
 Homepage = "https://github.com/jpfeuffer/bgen-limix"
@@ -33,6 +33,11 @@ Issues = "https://github.com/jpfeuffer/bgen-limix/issues"
 
 [project.optional-dependencies]
 test = ["pytest>=7"]
+
+# See scripts/dynamic_metadata.py: only adds the nanobind-backend dependency
+# when NOT building with BGEN_NANOBIND_BACKEND=private (self-contained backend).
+[[tool.dynamic-metadata]]
+provider = { path = "scripts", module = "dynamic_metadata" }
 
 [tool.scikit-build]
 cmake.build-type = "Release"
