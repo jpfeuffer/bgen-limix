@@ -60,6 +60,23 @@ S3_EXPORT int s3stream_init(void);
  * override it via s3stream_credentials::no_sign_request. */
 S3_EXPORT void s3stream_set_no_sign_request(int no_sign);
 
+/* Read-ahead size, in bytes, used to serve reads of remote objects: one range
+ * request covers this much, and reads inside it are served from memory.
+ *
+ * There is no size that suits every caller, and the library cannot tell what
+ * is coming next, so this is left to whoever does know the access pattern.
+ * A large value amortizes per-request latency over sequential reads; a small
+ * one avoids fetching bytes that a seek is about to skip. Callers alternating
+ * between the two can move it as they go.
+ *
+ * s3stream_set_chunk_size() sets the process-wide default for streams opened
+ * afterwards; it does not affect open ones. Values are clamped to a supported
+ * range. Overridden at startup by S3STREAM_CHUNK_SIZE (bytes) if set. */
+S3_EXPORT void s3stream_set_chunk_size(int64_t bytes);
+
+/* Returns the current process-wide default. */
+S3_EXPORT int64_t s3stream_get_chunk_size(void);
+
 /* Opens a path for reading.  s3:// URIs and http(s):// URLs are streamed;
  * anything else is passed to fopen(path, "rb"), so this is a drop-in
  * replacement for fopen in read paths.
@@ -132,6 +149,13 @@ S3_EXPORT int64_t stream_handle_tell(const stream_handle* handle);
 
 /* Non-zero once a read has hit end-of-stream; matches feof() semantics. */
 S3_EXPORT int stream_handle_eof(const stream_handle* handle);
+
+/* Sets this handle's read-ahead size, overriding the process-wide default for
+ * it alone; see s3stream_set_chunk_size(). Takes effect on the next range
+ * request, so buffered data already held is still used. Returns 0 on success,
+ * -1 if the handle is NULL. A no-op for local paths, which do their own
+ * buffering, and for handles on a build without S3 support. */
+S3_EXPORT int stream_handle_set_chunk_size(stream_handle* handle, int64_t bytes);
 
 /* Closes the handle and releases its resources. A no-op if handle is NULL. */
 S3_EXPORT void stream_handle_close(stream_handle* handle);

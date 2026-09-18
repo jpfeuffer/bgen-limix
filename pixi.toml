@@ -24,10 +24,10 @@ backend = { name = "pixi-build-cmake", version = "*" }
 [package.build.config]
 compilers = ["c", "cxx"]
 extra-args = [
+  "-DBUILD_SHARED_LIBS=ON",
   "-DBGEN_BUILD_TESTS=OFF",
   "-DBGEN_USE_SYSTEM_ZLIB_NG=ON",
   "-DBGEN_USE_SYSTEM_ZSTD=ON",
-  "-DBGEN_USE_SYSTEM_ATHR=ON",
   "-DBGEN_USE_SYSTEM_CURL=ON",
   "-DBGEN_ENABLE_S3=ON",
 ]
@@ -35,7 +35,6 @@ extra-args = [
 [package.host-dependencies]
 zstd = "*"
 zlib-ng = "*"
-almosthere = "*"
 libcurl = "*"
 
 [package.run-dependencies]
@@ -43,7 +42,6 @@ libcurl = "*"
 # libraries must be present at runtime wherever bgen is used.
 zstd = "*"
 zlib-ng = "*"
-almosthere = "*"
 libcurl = "*"
 
 # ---------------------------------------------------------------------------
@@ -58,7 +56,6 @@ cmake = "*"
 ninja = "*"
 zstd = "*"
 zlib-ng = "*"
-almosthere = "*"
 libcurl = "*"
 
 [feature.python.dependencies]

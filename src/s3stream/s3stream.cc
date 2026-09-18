@@ -3,6 +3,7 @@
 
 #include "s3stream_internal.h"
 
+#include <atomic>
 #include <errno.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -112,6 +113,14 @@ int64_t LocalRead(stream_handle* handle, void* buf, size_t n) {
 }  // namespace
 }  // namespace s3stream
 
+namespace s3stream {
+/* Default read-ahead: amortizes per-request latency over large sequential
+ * reads without making a small read of a large object expensive. Defined
+ * unconditionally so s3stream_get_chunk_size() reports a sane value in both
+ * the enabled and stub (S3STREAM_ENABLE off) builds. */
+const int64_t kChunkSizeDefault = 8 * 1024 * 1024;
+}  // namespace s3stream
+
 extern "C" int stream_handle_eof(const stream_handle* handle) {
   return handle ? (handle->eof ? 1 : 0) : 0;
 }
@@ -124,6 +133,16 @@ extern "C" int stream_handle_eof(const stream_handle* handle) {
 extern "C" int s3stream_init(void) { return 0; }
 
 extern "C" void s3stream_set_no_sign_request(int no_sign) { (void)no_sign; }
+
+extern "C" void s3stream_set_chunk_size(int64_t bytes) { (void)bytes; }
+
+extern "C" int64_t s3stream_get_chunk_size(void) { return s3stream::kChunkSizeDefault; }
+
+extern "C" int stream_handle_set_chunk_size(stream_handle* handle,
+                                           int64_t bytes) {
+  (void)bytes;
+  return handle ? 0 : -1;
+}
 
 extern "C" FILE* s3stream_open(const char* path) {
   if (s3stream_is_remote(path)) {
@@ -211,9 +230,33 @@ namespace s3stream {
 
 namespace {
 
-/* Sized to amortize per-request latency over large sequential reads without
- * making a small read of a large object expensive. */
-const int64_t kChunkSize = 8 * 1024 * 1024;
+/* Read-ahead bounds; see kChunkSizeDefault above for the rationale. */
+const int64_t kChunkSizeMin = 4 * 1024;
+const int64_t kChunkSizeMax = 512 * 1024 * 1024;
+
+int64_t ClampChunkSize(int64_t bytes) {
+  if (bytes < kChunkSizeMin) return kChunkSizeMin;
+  if (bytes > kChunkSizeMax) return kChunkSizeMax;
+  return bytes;
+}
+
+std::atomic<int64_t> g_chunk_size(kChunkSizeDefault);
+std::once_flag g_chunk_size_once;
+
+/* Applies S3STREAM_CHUNK_SIZE once, so the default can be tuned in
+ * environments where the calling code cannot be changed. */
+int64_t DefaultChunkSize() {
+  std::call_once(g_chunk_size_once, [] {
+    const std::string v = GetEnv("S3STREAM_CHUNK_SIZE");
+    if (v.empty()) return;
+    errno = 0;
+    char* end = nullptr;
+    const long long parsed = strtoll(v.c_str(), &end, 10);
+    if ((errno == 0) && end && (*end == '\0') && (parsed > 0))
+      g_chunk_size.store(ClampChunkSize(parsed), std::memory_order_relaxed);
+  });
+  return g_chunk_size.load(std::memory_order_relaxed);
+}
 
 std::once_flag g_init_once;
 CURLcode g_init_result = CURLE_OK;
@@ -324,13 +367,16 @@ struct StreamState {
   int64_t buf_start;
   int64_t buf_end;
 
+  int64_t chunk_size;
+
   StreamState()
       : sign(true),
         explicit_creds(false),
         file_size(-1),
         pos(0),
         buf_start(0),
-        buf_end(0) {}
+        buf_end(0),
+        chunk_size(DefaultChunkSize()) {}
 };
 
 Request MakeRequest(const StreamState* state) {
@@ -386,7 +432,7 @@ bool FetchChunk(StreamState* state, int64_t offset) {
     return true;
   }
 
-  int64_t fetch_end = offset + kChunkSize - 1;
+  int64_t fetch_end = offset + state->chunk_size - 1;
   if ((state->file_size >= 0) && (fetch_end >= state->file_size)) {
     fetch_end = state->file_size - 1;
   }
@@ -909,6 +955,28 @@ extern "C" int s3stream_init(void) {
 
 extern "C" void s3stream_set_no_sign_request(int no_sign) {
   s3stream::g_no_sign_request = (no_sign != 0);
+}
+
+extern "C" void s3stream_set_chunk_size(int64_t bytes) {
+  s3stream::DefaultChunkSize();  // settle any env override first
+  s3stream::g_chunk_size.store(s3stream::ClampChunkSize(bytes),
+                               std::memory_order_relaxed);
+}
+
+extern "C" int64_t s3stream_get_chunk_size(void) {
+  return s3stream::DefaultChunkSize();
+}
+
+extern "C" int stream_handle_set_chunk_size(stream_handle* handle,
+                                           int64_t bytes) {
+  if (!handle) {
+    errno = EINVAL;
+    return -1;
+  }
+  if (handle->remote)
+    static_cast<s3stream::StreamState*>(handle->remote)->chunk_size =
+        s3stream::ClampChunkSize(bytes);
+  return 0;
 }
 
 extern "C" FILE* s3stream_open(const char* path) {
