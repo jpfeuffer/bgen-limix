@@ -43,9 +43,22 @@ find_package(Python REQUIRED COMPONENTS Interpreter Development.Module NumPy
   OPTIONAL_COMPONENTS Development.SABIModule)
 find_package(nanobind CONFIG REQUIRED)
 
-# Split mode: link against the nanobind-backend wheel instead of statically
-# embedding libnanobind, so a single abi3 wheel covers Python 3.10+.
-nanobind_add_module(_core STABLE_ABI BACKEND_MODULE nanobind_backend ${CMAKE_CURRENT_SOURCE_DIR}/bindings.cpp)
+# "shared" links against the externally hosted nanobind-backend wheel/package
+# so a single abi3 wheel covers Python 3.10+ on PyPI. "private" builds our own
+# backend module instead: conda-forge builds one package per Python version
+# regardless of abi3 (no shared-backend infra there), so a "shared" build
+# would just add an unmet nanobind-backend dependency for no benefit; conda
+# packaging should use "private".
+set(BGEN_NANOBIND_BACKEND "shared" CACHE STRING "nanobind split-mode backend: shared (external nanobind-backend) or private (self-contained)")
+set_property(CACHE BGEN_NANOBIND_BACKEND PROPERTY STRINGS shared private)
+
+if(BGEN_NANOBIND_BACKEND STREQUAL "private")
+  nanobind_add_backend(_bgen_nb_backend)
+  nanobind_add_module(_core STABLE_ABI BACKEND_MODULE _bgen_nb_backend ${CMAKE_CURRENT_SOURCE_DIR}/bindings.cpp)
+  install(TARGETS _bgen_nb_backend LIBRARY DESTINATION cbgen)
+else()
+  nanobind_add_module(_core STABLE_ABI BACKEND_MODULE nanobind_backend ${CMAKE_CURRENT_SOURCE_DIR}/bindings.cpp)
+endif()
 target_link_libraries(_core PRIVATE BGEN::bgen)
 target_include_directories(_core PRIVATE ${Python_NumPy_INCLUDE_DIRS})
 
