@@ -5,12 +5,17 @@
  * external library. Replaces almosthere (athr), whose CMake packaging kept
  * breaking downstream consumers with dangling internal link targets.
  *
- * isatty()/fileno() are POSIX, not C11; the -std=c11 with extensions off
- * this project builds under hides them on glibc unless a feature-test macro
- * asks for them, which has to be defined before the *first* standard header
- * anywhere in the translation unit -- io.h, included earlier by every
- * caller of this header, already pulls in <stdio.h>, so it is set as a
- * compile definition on the bgen target instead (see CMakeLists.txt). */
+ * isatty()/fileno() are POSIX (or, on Windows, MS-specific), not C11; the
+ * -std=c11 with extensions off this project builds under hides them behind
+ * a feature-test macro on glibc, and MinGW's headers do the same to their
+ * underscore-prefixed equivalents. The glibc case is handled with a compile
+ * definition on the bgen target instead of an in-header #define (see
+ * CMakeLists.txt: io.h, included earlier by every caller of this header,
+ * already pulls in <stdio.h>, so the macro would apply too late in that
+ * translation unit). On Windows this declares the two functions itself
+ * rather than chase whichever macro a given MinGW version gates them
+ * behind: they are ordinary CRT exports (msvcrt/ucrtbase), present under
+ * MSVC and MinGW alike, independent of header visibility. */
 
 #include <inttypes.h>
 #include <stdint.h>
@@ -18,7 +23,8 @@
 #include <time.h>
 
 #if defined(_WIN32)
-#include <io.h>
+extern int _isatty(int);
+extern int _fileno(FILE*);
 #define bgen_progress_isatty(fd) _isatty(fd)
 #define bgen_progress_fileno(f) _fileno(f)
 #else
