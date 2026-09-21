@@ -2,7 +2,7 @@ schema_version: 1
 
 context:
   name: bgen-limix
-  version: "4.10.2"
+  version: "4.11.0"
   # Distinct package names because this is a diverged fork of limix/bgen
   # (adds S3 streaming support, nanobind split-mode bindings, etc.) and would
   # otherwise collide with the existing conda-forge "bgen" package.
@@ -15,7 +15,7 @@ recipe:
 
 source:
   - url: https://github.com/jpfeuffer/bgen-limix/archive/refs/tags/v${{ version }}.tar.gz
-    sha256: e1f4cf9daa2090e545916e4f9cd205123ffee15eaa33b4794c95684c2dae86f5
+    sha256: 3fe20a0e1101765e7c4b38cdf726a7c67857823f3094550169ce01bef69e1654
 
 build:
   number: 0
