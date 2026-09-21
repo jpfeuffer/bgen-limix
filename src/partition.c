@@ -1,4 +1,5 @@
 #include "partition.h"
+#include "bgen/variant.h"
 #include "bstring.h"
 #include "free.h"
 #include "variant.h"

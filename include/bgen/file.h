@@ -5,6 +5,7 @@
 #define BGEN_FILE_H
 
 #include "bgen/export.h"
+#include "bgen/s3stream.h"
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -12,6 +13,15 @@
  * @struct bgen_file
  */
 struct bgen_file;
+
+/** Return the handler's underlying stream, for callers that read variant
+ * records themselves (e.g. resolving a `.bgi` offset the same way sequential
+ * scanning does).
+ *
+ * @param bgen_file Bgen file handler.
+ * @return Stream handle. Owned by `bgen_file`; do not close it directly.
+ */
+BGEN_EXPORT stream_handle* bgen_file_stream(struct bgen_file const* bgen_file);
 
 /** Open bgen file and return a handler.
  *

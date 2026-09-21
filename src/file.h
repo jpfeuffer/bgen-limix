@@ -8,7 +8,7 @@
 
 struct bgen_file;
 
-stream_handle* bgen_file_stream(struct bgen_file const* bgen_file);
+// bgen_file_stream is public (bgen/file.h); rest stays private.
 char const*      bgen_file_filepath(struct bgen_file const* bgen_file);
 
 int              bgen_file_seek_variants_start(struct bgen_file* bgen_file);
