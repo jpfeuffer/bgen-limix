@@ -25,13 +25,15 @@ find_package(Python REQUIRED COMPONENTS Interpreter Development.Module NumPy
   OPTIONAL_COMPONENTS Development.SABIModule)
 find_package(nanobind CONFIG REQUIRED)
 
-# "shared" links against the externally hosted nanobind-backend wheel/package
-# so a single abi3 wheel covers Python 3.10+ on PyPI. "private" builds our own
-# backend module instead: nothing on conda-forge hosts nanobind-backend, so a
-# "shared" build would just add an unmet dependency there; conda packaging
-# uses "private" and gets the same one-build-per-platform abi3 result via
-# recipe/recipe.yaml's is_abi3/python-abi3 handling (build.python.version_independent),
-# not via the shared-backend package.
+# "shared" links against the externally hosted nanobind-backend wheel/package,
+# a separately versioned package that pip resolves per-interpreter, giving a
+# single abi3 wheel that covers Python 3.10+ on PyPI. "private" builds the
+# backend module into our own binary instead: this is NOT itself abi3 (the
+# backend shim touches parts of the C API outside Py_LIMITED_API), so a
+# "private" build only works for the exact Python version it was compiled
+# against -- one conda package per Python version, same as any other
+# extension module. conda-forge has no nanobind-backend package to depend on,
+# so it uses "private" and pays for that with the usual per-version matrix.
 set(BGEN_NANOBIND_BACKEND "shared" CACHE STRING "nanobind split-mode backend: shared (external nanobind-backend) or private (self-contained)")
 set_property(CACHE BGEN_NANOBIND_BACKEND PROPERTY STRINGS shared private)
 
