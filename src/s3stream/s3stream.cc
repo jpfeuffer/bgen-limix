@@ -260,9 +260,23 @@ int64_t DefaultChunkSize() {
 
 std::once_flag g_init_once;
 CURLcode g_init_result = CURLE_OK;
+const char* g_too_old_version = nullptr;
 bool g_no_sign_request = false;
 
-void GlobalInit() { g_init_result = curl_global_init(CURL_GLOBAL_DEFAULT); }
+/* 7.75.0 introduced CURLOPT_AWS_SIGV4.  Checked at run time as well as
+ * build time, since the shared library can be older than the headers. */
+const unsigned int kMinCurlVersion = 0x074b00;
+
+void GlobalInit() {
+  g_init_result = curl_global_init(CURL_GLOBAL_DEFAULT);
+  if (g_init_result != CURLE_OK) {
+    return;
+  }
+  const curl_version_info_data* info = curl_version_info(CURLVERSION_NOW);
+  if (!info || (info->version_num < kMinCurlVersion)) {
+    g_too_old_version = (info && info->version) ? info->version : "unknown";
+  }
+}
 
 /* ---------------------------------------------------------------------------
  * Endpoint resolution
@@ -948,6 +962,12 @@ extern "C" int s3stream_init(void) {
   if (s3stream::g_init_result != CURLE_OK) {
     s3stream::SetError("could not initialize libcurl: %s",
                        curl_easy_strerror(s3stream::g_init_result));
+    return -1;
+  }
+  if (s3stream::g_too_old_version) {
+    s3stream::SetError(
+        "libcurl %s is too old for S3 support (7.75.0 or newer is required)",
+        s3stream::g_too_old_version);
     return -1;
   }
   return 0;

@@ -11,6 +11,10 @@
 #include <map>
 #include <string>
 
+#ifdef S3STREAM_ENABLE
+#  include <curl/curl.h>
+#endif
+
 namespace s3stream {
 
 /* Records a message retrievable via s3stream_last_error().  Thread-local, so
@@ -123,6 +127,12 @@ struct Request {
  * could be obtained at all; an HTTP error status is reported through
  * out->status with false never returned for it. */
 bool Perform(const Request& req, Response* out);
+
+#ifdef S3STREAM_ENABLE
+/* Limits `curl` to http/https.  Returns false if libcurl refuses, which
+ * callers must treat as fatal. */
+bool RestrictToHttp(CURL* curl);
+#endif
 
 /* Retries `req` against the region named in a 301/400 redirect response, if
  * the response carries one.  `url` is rewritten in place on success.  Returns

@@ -56,6 +56,12 @@ bool FetchMetadata(const std::string& url, const char* method,
   if (!curl) {
     return false;
   }
+  /* AWS_CONTAINER_CREDENTIALS_FULL_URI is an arbitrary URL from the
+   * environment; it must not be able to name file:// or anything else. */
+  if (!RestrictToHttp(curl)) {
+    curl_easy_cleanup(curl);
+    return false;
+  }
   struct curl_slist* headers = nullptr;
   if (!header.empty()) {
     headers = curl_slist_append(nullptr, header.c_str());

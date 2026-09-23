@@ -176,11 +176,26 @@ std::string RedirectRegion(const Response& response) {
   return header ? *header : std::string();
 }
 
+bool HasPrefix(const std::string& text, const char* prefix) {
+  return text.compare(0, strlen(prefix), prefix) == 0;
+}
+
+/* Fails a request before it is sent.  The message goes into error_buffer
+ * rather than SetError(), because Perform() reports that buffer. */
+CURLcode AbortRequest(CURL* curl, struct curl_slist* headers,
+                      char* error_buffer, const char* message) {
+  snprintf(error_buffer, CURL_ERROR_SIZE, "%s", message);
+  curl_slist_free_all(headers);
+  curl_easy_cleanup(curl);
+  return CURLE_BAD_FUNCTION_ARGUMENT;
+}
+
 CURLcode PerformOnce(const Request& req, Response* out, char* error_buffer) {
   CURL* curl = curl_easy_init();
   if (!curl) {
     return CURLE_FAILED_INIT;
   }
+  struct curl_slist* headers = nullptr;
 
   out->body.clear();
   out->headers.clear();
@@ -211,28 +226,35 @@ CURLcode PerformOnce(const Request& req, Response* out, char* error_buffer) {
   curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, kLowSpeedTimeSeconds);
   /* A SigV4 signature is bound to the host it was computed for, so following
    * a redirect would send a signature the new host must reject.  Region
-   * redirects are handled explicitly instead. */
-  curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 0L);
+   * redirects are handled explicitly instead.
+   *
+   * The options below are checked because a runtime libcurl older than the
+   * headers rejects unknown options at run time rather than at build time,
+   * which would silently drop the protection. */
+  if (curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 0L) != CURLE_OK) {
+    return AbortRequest(curl, headers, error_buffer,
+                        "libcurl rejected CURLOPT_FOLLOWLOCATION");
+  }
   /* Certificate verification is libcurl's default, but say so explicitly:
    * this is the only thing standing between a signed request and a MITM, and
-   * it should not silently depend on how libcurl was built. */
-  curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
-  curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
-  /* s3stream speaks only HTTP; nothing should be able to talk curl into FILE,
-   * SCP or GOPHER by way of a crafted endpoint URL. */
-#if LIBCURL_VERSION_NUM >= 0x075500
-  curl_easy_setopt(curl, CURLOPT_PROTOCOLS_STR, "http,https");
-#else
-  curl_easy_setopt(curl, CURLOPT_PROTOCOLS,
-                   static_cast<long>(CURLPROTO_HTTP | CURLPROTO_HTTPS));
-#endif
+   * it should not silently depend on how libcurl was built.  Plain-http
+   * endpoints are exempt, since a libcurl without TLS may reject these. */
+  if (HasPrefix(req.url, "https://") &&
+      ((curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L) != CURLE_OK) ||
+       (curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L) != CURLE_OK))) {
+    return AbortRequest(curl, headers, error_buffer,
+                        "libcurl cannot enforce TLS certificate verification");
+  }
+  if (!RestrictToHttp(curl)) {
+    return AbortRequest(curl, headers, error_buffer,
+                        "libcurl cannot restrict requests to http/https");
+  }
 
   const std::string ca_bundle = GetEnv("AWS_CA_BUNDLE");
   if (!ca_bundle.empty()) {
     curl_easy_setopt(curl, CURLOPT_CAINFO, ca_bundle.c_str());
   }
 
-  struct curl_slist* headers = nullptr;
   if (!req.range.empty()) {
     curl_easy_setopt(curl, CURLOPT_RANGE, req.range.c_str());
   }
@@ -241,10 +263,9 @@ CURLcode PerformOnce(const Request& req, Response* out, char* error_buffer) {
    * bytes on the wire, so re-check rather than trust the call chain. */
   if (!req.if_match.empty()) {
     if (!IsSafeHeaderValue(req.if_match, kMaxHeaderLineBytes)) {
-      curl_slist_free_all(headers);
-      curl_easy_cleanup(curl);
-      SetError("server supplied an ETag that cannot be sent in a header");
-      return CURLE_BAD_FUNCTION_ARGUMENT;
+      return AbortRequest(
+          curl, headers, error_buffer,
+          "server supplied an ETag that cannot be sent in a header");
     }
     const std::string header = "If-Match: " + req.if_match;
     headers = curl_slist_append(headers, header.c_str());
@@ -253,10 +274,9 @@ CURLcode PerformOnce(const Request& req, Response* out, char* error_buffer) {
   if (req.sign && req.creds && !req.creds->Empty()) {
     if (!req.creds->session_token.empty()) {
       if (!IsSafeHeaderValue(req.creds->session_token, kMaxHeaderLineBytes)) {
-        curl_slist_free_all(headers);
-        curl_easy_cleanup(curl);
-        SetError("session token contains characters that cannot be sent in a header");
-        return CURLE_BAD_FUNCTION_ARGUMENT;
+        return AbortRequest(
+            curl, headers, error_buffer,
+            "session token contains characters that cannot be sent in a header");
       }
       const std::string header =
           "x-amz-security-token: " + req.creds->session_token;
@@ -265,7 +285,10 @@ CURLcode PerformOnce(const Request& req, Response* out, char* error_buffer) {
     /* curl signs every header supplied here, which is what makes the
      * security-token and If-Match headers above acceptable to S3. */
     const std::string sigv4 = "aws:amz:" + req.region + ":s3";
-    curl_easy_setopt(curl, CURLOPT_AWS_SIGV4, sigv4.c_str());
+    if (curl_easy_setopt(curl, CURLOPT_AWS_SIGV4, sigv4.c_str()) != CURLE_OK) {
+      return AbortRequest(curl, headers, error_buffer,
+                          "libcurl was built without AWS SigV4 signing support");
+    }
     userpwd = req.creds->access_key + ":" + req.creds->secret_key;
     curl_easy_setopt(curl, CURLOPT_USERPWD, userpwd.c_str());
   }
@@ -286,6 +309,27 @@ CURLcode PerformOnce(const Request& req, Response* out, char* error_buffer) {
 }
 
 }  // namespace
+
+bool RestrictToHttp(CURL* curl) {
+#if LIBCURL_VERSION_NUM >= 0x075500
+  const CURLcode res = curl_easy_setopt(curl, CURLOPT_PROTOCOLS_STR, "http,https");
+  if (res != CURLE_UNKNOWN_OPTION) {
+    return res == CURLE_OK;
+  }
+#endif
+  /* Deprecated in 7.85 but still honored, and the only spelling that
+   * 7.75-7.84 runtimes understand. */
+#if defined(__GNUC__)
+#  pragma GCC diagnostic push
+#  pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+  return curl_easy_setopt(curl, CURLOPT_PROTOCOLS,
+                          static_cast<long>(CURLPROTO_HTTP | CURLPROTO_HTTPS)) ==
+         CURLE_OK;
+#if defined(__GNUC__)
+#  pragma GCC diagnostic pop
+#endif
+}
 
 bool IsSafeHeaderValue(const std::string& value, size_t max_len) {
   if (value.empty() || (value.size() > max_len)) {
