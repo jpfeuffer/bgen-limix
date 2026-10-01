@@ -204,11 +204,14 @@ target_compile_definitions(
   $<$<BOOL:${WIN32}>:_CRT_NONSTDC_NO_DEPRECATE>
   $<$<BOOL:${BGEN_ENABLE_S3}>:BGEN_S3_SUPPORT>)
 
-target_link_libraries(bgen PUBLIC ${_bgen_zlibng})
+# PRIVATE: no public header includes zlib-ng or zstd, so consumers of a shared
+# libbgen must not link them. For a static libbgen CMake still exports them as
+# $<LINK_ONLY:...>, and bgen-config.cmake then find_dependency()s them.
+target_link_libraries(bgen PRIVATE ${_bgen_zlibng})
 if(TARGET zstd::libzstd_shared)
-  target_link_libraries(bgen PUBLIC zstd::libzstd_shared)
+  target_link_libraries(bgen PRIVATE zstd::libzstd_shared)
 elseif(TARGET zstd::libzstd_static)
-  target_link_libraries(bgen PUBLIC zstd::libzstd_static)
+  target_link_libraries(bgen PRIVATE zstd::libzstd_static)
 endif()
 
 # --- s3stream: S3/HTTP(S) streaming, exposed as its own linkable target so
@@ -323,6 +326,15 @@ install(
   FILE bgen-targets.cmake
   NAMESPACE BGEN::
   DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/bgen)
+
+# The private link dependencies only leak into consumers (and so need
+# find_dependency in the package config) when the libraries are static.
+get_target_property(_bgen_type bgen TYPE)
+if(_bgen_type STREQUAL "STATIC_LIBRARY")
+  set(BGEN_STATIC_LIBS ON)
+else()
+  set(BGEN_STATIC_LIBS OFF)
+endif()
 
 include(CMakePackageConfigHelpers)
 configure_package_config_file(
