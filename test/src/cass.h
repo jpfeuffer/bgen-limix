@@ -1,6 +1,7 @@
 #ifndef CASS_H
 #define CASS_H
 
+#include <float.h>
 #include <inttypes.h>
 #include <math.h>
 #include <stdio.h>
@@ -129,7 +130,8 @@ inline static int cass_close_impl(double actual, double desired, double rel_tol,
      * above.
      */
 
-    if (isinf(actual) || isinf(desired)) {
+    /* Not isinf(): MinGW's macro trips -Wfloat-conversion on doubles. */
+    if (fabs(actual) > DBL_MAX || fabs(desired) > DBL_MAX) {
         return 1;
     }
 

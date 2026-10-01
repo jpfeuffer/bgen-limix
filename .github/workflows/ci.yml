@@ -113,17 +113,23 @@ jobs:
           environments: test
 
       - name: Start MinIO server
+        # quay.io/minio/minio is no longer publicly pullable ("unauthorized"),
+        # so use conda-forge's minio-server, as the Windows job does.
+        env:
+          MINIO_ROOT_USER: minio_access
+          MINIO_ROOT_PASSWORD: minio_secret
         run: |
-          docker run -d --name minio-ci \
-            -p 19000:9000 \
-            -e MINIO_ROOT_USER=minio_access \
-            -e MINIO_ROOT_PASSWORD=minio_secret \
-            quay.io/minio/minio:latest server /data
-          # Wait for MinIO
-          for i in $(seq 1 30); do
-            curl -sf http://127.0.0.1:19000/minio/health/live && break
+          minio_bin=$(pixi exec --spec minio-server -- sh -c 'command -v minio')
+          mkdir -p "$RUNNER_TEMP/miniodata"
+          nohup "$minio_bin" server "$RUNNER_TEMP/miniodata" --address :19000 \
+            > "$RUNNER_TEMP/minio.log" 2>&1 &
+          for i in $(seq 1 60); do
+            curl -sf http://127.0.0.1:19000/minio/health/live && exit 0
             sleep 1
           done
+          cat "$RUNNER_TEMP/minio.log"
+          echo "::error::MinIO did not become healthy"
+          exit 1
 
       - name: Upload test data to MinIO
         env:

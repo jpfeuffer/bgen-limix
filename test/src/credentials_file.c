@@ -6,6 +6,10 @@
  *
  * env vars manipulated here are restored before the test returns.
  */
+#if !defined(_WIN32) && !defined(_POSIX_C_SOURCE)
+/* setenv/unsetenv/mkstemp are POSIX, hidden by -std=c11 on glibc. */
+#  define _POSIX_C_SOURCE 200809L
+#endif
 #include "cass.h"
 #include <stdio.h>
 #include <stdlib.h>

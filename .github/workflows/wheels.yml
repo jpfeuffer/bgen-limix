@@ -64,10 +64,16 @@ jobs:
           CIBW_ARCHS_MACOS: "native"
           # Windows: build AMD64 only
           CIBW_ARCHS_WINDOWS: "AMD64"
-          # Install OpenSSL headers needed by fetched curl on Linux
+          # Install OpenSSL headers needed by fetched curl on Linux. Retries
+          # with a metadata refresh because AlmaLinux mirrors are sometimes
+          # out of sync (404 on repodata); fails loudly instead of later in CMake.
           CIBW_BEFORE_BUILD_LINUX: >
-            (command -v yum && yum install -y openssl-devel) ||
-            (command -v apk && apk add openssl-dev) || true
+            if command -v yum; then
+              for i in 1 2 3; do yum install -y openssl-devel && break; yum clean all; sleep 10; done;
+              rpm -q openssl-devel;
+            elif command -v apk; then
+              apk add openssl-dev;
+            fi
 
       - uses: actions/upload-artifact@v7.0.1
         with:

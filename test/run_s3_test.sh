@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Run the bgen S3 integration test against a local MinIO container.
+# Run the bgen S3 integration test against a local MinIO server.
 #
-# Requirements: docker, aws CLI (v2).
-# Usage: ./test/run_s3_test.sh [--keep]   (--keep: leave container running after success)
+# Requirements: pixi (for conda-forge minio-server), aws CLI (v2).
+# Usage: ./test/run_s3_test.sh [--keep]   (--keep: leave MinIO running after success)
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BGEN_FILE="$REPO_ROOT/test/data/example.14bits.bgen"
-MINIO_CONTAINER="bgen-minio-test"
+MINIO_DATA="$(mktemp -d)"
 MINIO_PORT=19000
 BUCKET="bgen-test"
 KEY="example.14bits.bgen"
@@ -20,20 +20,25 @@ for arg in "$@"; do
 done
 
 cleanup() {
-  echo "--- Stopping MinIO container ---"
-  docker rm -f "$MINIO_CONTAINER" 2>/dev/null || true
+  echo "--- Stopping MinIO ---"
+  kill "$MINIO_PID" 2>/dev/null || true
+  rm -rf "$MINIO_DATA"
 }
-[[ $KEEP -eq 0 ]] && trap cleanup EXIT
 
 # ── 1. Start MinIO ───────────────────────────────────────────────────────────
+# quay.io/minio/minio is no longer publicly pullable, so use conda-forge's
+# minio-server. Run the resolved binary directly so $MINIO_PID is MinIO itself.
 echo "--- Starting MinIO ---"
-docker rm -f "$MINIO_CONTAINER" 2>/dev/null || true
-docker run -d \
-  --name "$MINIO_CONTAINER" \
-  -p "${MINIO_PORT}:9000" \
-  -e "MINIO_ROOT_USER=${ACCESS}" \
-  -e "MINIO_ROOT_PASSWORD=${SECRET}" \
-  quay.io/minio/minio:latest server /data
+MINIO_BIN="$(pixi exec --spec minio-server -- sh -c 'command -v minio')"
+MINIO_ROOT_USER="$ACCESS" MINIO_ROOT_PASSWORD="$SECRET" \
+  "$MINIO_BIN" server "$MINIO_DATA" --address ":${MINIO_PORT}" \
+  >"$MINIO_DATA.log" 2>&1 &
+MINIO_PID=$!
+if [[ $KEEP -eq 0 ]]; then
+  trap cleanup EXIT
+else
+  echo "MinIO PID $MINIO_PID (data: $MINIO_DATA)"
+fi
 
 # ── 2. Wait for MinIO to become healthy ──────────────────────────────────────
 echo "--- Waiting for MinIO to be ready ---"

@@ -239,4 +239,4 @@ const char* get_example_index_filepath(size_t i) { return indices[i]; }
 
 unsigned get_example_precision(size_t i) { return precision[i]; }
 
-unsigned get_nexamples() { return 3; }
+unsigned get_nexamples(void) { return 3; }

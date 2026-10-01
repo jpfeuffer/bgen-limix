@@ -248,7 +248,9 @@ set_target_properties(
   SOVERSION ${PROJECT_VERSION_MAJOR})
 
 target_compile_definitions(
-  bgen_s3 PRIVATE $<$<BOOL:${BGEN_ENABLE_S3}>:S3STREAM_ENABLE>)
+  bgen_s3 PRIVATE
+  $<$<BOOL:${WIN32}>:_CRT_SECURE_NO_WARNINGS>
+  $<$<BOOL:${BGEN_ENABLE_S3}>:S3STREAM_ENABLE>)
 
 target_compile_options(bgen_s3 PRIVATE
   $<$<COMPILE_LANGUAGE:CXX>:${BGEN_CXX_WARNING_FLAGS}>)

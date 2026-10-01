@@ -50,8 +50,10 @@ static void bgen_progress_render(struct bgen_progress const* p, time_t now)
     if (p->done > 0 && p->done < p->total) {
         double rate = (double)p->done / (elapsed > 0.0 ? elapsed : 1.0);
         if (rate > 0.0) {
-            long secs = (long)((double)(p->total - p->done) / rate);
-            snprintf(eta, sizeof(eta), "%02ld:%02ld:%02ld", secs / 3600, (secs / 60) % 60,
+            double remaining = (double)(p->total - p->done) / rate;
+            /* Clamped so the fields provably fit eta[] (-Wformat-truncation). */
+            int secs = remaining > 359999.0 ? 359999 : (int)remaining;
+            snprintf(eta, sizeof(eta), "%02d:%02d:%02d", secs / 3600, (secs / 60) % 60,
                      secs % 60);
         }
     } else if (p->done >= p->total) {

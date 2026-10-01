@@ -253,7 +253,7 @@ MAKE_READ_PHASED_GENOTYPE(32, float)
                 } else {                                                                       \
                     for (uint8_t bi = 0; bi < (uint8_t)nbits; ++bi) {                         \
                         if (get_bit(genotype->chunk_ptr, bi + offset))                        \
-                            ui_prob |= ((uint##BITS##_t)1 << bi);                             \
+                            ui_prob |= ((uint64_t)1 << bi);                                   \
                     }                                                                         \
                 }                                                                             \
                 *probs = (FPTYPE)ui_prob / denom;                                             \
