@@ -330,3 +330,25 @@ def test_layout2_ploidy_boundaries(tmp_path, compression, phased, ploidies, nall
         np.testing.assert_array_equal(
             bgen.read_genotype(offsets[0]).probability, expected
         )
+
+
+@pytest.mark.parametrize("nsamples", [1, 15, 16, 17, 63, 64, 65])
+def test_fixed_ploidy_validation_tail(tmp_path, nsamples):
+    missing = [i % 2 == 0 for i in range(nsamples)]
+    block, expected = _layout2(8, False, [2] * nsamples, missing=missing)
+    path = tmp_path / "fixed.bgen"
+    offsets = _write_bgen(path, 2, 2, [block], nsamples)
+    with BgenFile(path) as bgen:
+        genotype = bgen.read_genotype(offsets[0])
+        np.testing.assert_array_equal(genotype.probability, expected)
+        np.testing.assert_array_equal(genotype.ploidy, [2] * nsamples)
+        np.testing.assert_array_equal(genotype.missing, missing)
+    bad_block = bytearray(block)
+    bad_block[8 + nsamples - 1] = 3
+    bad_path = tmp_path / "invalid_tail.bgen"
+    offsets = _write_bgen(bad_path, 2, 2, [bad_block], nsamples)
+    with (
+        BgenFile(bad_path) as bgen,
+        pytest.raises(RuntimeError, match="Could not open genotype"),
+    ):
+        bgen.read_genotype(offsets[0])

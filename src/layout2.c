@@ -43,6 +43,10 @@ static inline void set_array_nan32(float* p, size_t n)
 
 static int checked_ncombs(unsigned ploidy, unsigned nalleles, unsigned* result)
 {
+    if (nalleles <= 2) {
+        *result = nalleles == 1 ? 1 : ploidy + 1;
+        return 0;
+    }
     unsigned n = ploidy + nalleles - 1;
     unsigned k = ploidy < nalleles - 1 ? ploidy : nalleles - 1;
     uint64_t count = 1;
@@ -109,8 +113,7 @@ int bgen_layout2_read_header(struct bgen_file* bgen_file, struct bgen_genotype* 
     genotype->max_ploidy = max_ploidy;
 
     uint8_t* plo_miss = bgen_file_ploidy_scratch(bgen_file);
-    if (nsamples)
-        memcpy(plo_miss, chunk_ptr, nsamples);
+    uint8_t const* encoded_ploidy = (uint8_t const*)chunk_ptr;
     chunk_ptr += nsamples;
 
     uint8_t phased = 0;
@@ -142,24 +145,49 @@ int bgen_layout2_read_header(struct bgen_file* bgen_file, struct bgen_genotype* 
 
     uint64_t probability_bits = 0;
     size_t payload_size = size - (size_t)(chunk_ptr - chunk);
-    for (uint32_t i = 0; i < nsamples; ++i) {
-        unsigned ploidy = read_ploidy(plo_miss[i]);
-        if (ploidy < min_ploidy || ploidy > max_ploidy) {
+    if (min_ploidy == max_ploidy) {
+        /* Keep common fixed-ploidy validation vectorizable while copying. */
+        unsigned invalid_ploidy = 0;
+        for (uint32_t i = 0; i < nsamples; ++i) {
+            uint8_t value = encoded_ploidy[i];
+            plo_miss[i] = value;
+            invalid_ploidy |= read_ploidy(value) != max_ploidy;
+        }
+        if (invalid_ploidy) {
             bgen_error("sample ploidy outside genotype range");
             goto err;
         }
-        unsigned count = 0;
-        if (phased)
-            count = ploidy * (unsigned)(nalleles - 1);
-        else {
-            if (checked_ncombs(ploidy, nalleles, &count))
-                goto err;
-            --count;
-        }
-        probability_bits += (uint64_t)nbits * count;
-        if ((probability_bits + 7) / 8 > payload_size) {
+        uint64_t bits_per_sample = (uint64_t)nbits * (phased ?
+            (unsigned)max_ploidy * (unsigned)(nalleles - 1) : genotype->ncombs - 1);
+        if (bits_per_sample && nsamples > (uint64_t)payload_size * 8 / bits_per_sample) {
             bgen_error("layout 2 probability data is truncated");
             goto err;
+        }
+        probability_bits = (uint64_t)nsamples * bits_per_sample;
+    } else {
+        unsigned counts[64];
+        for (unsigned ploidy = min_ploidy; ploidy <= max_ploidy; ++ploidy) {
+            if (phased)
+                counts[ploidy] = ploidy * (unsigned)(nalleles - 1);
+            else {
+                if (checked_ncombs(ploidy, nalleles, &counts[ploidy]))
+                    goto err;
+                --counts[ploidy];
+            }
+        }
+        for (uint32_t i = 0; i < nsamples; ++i) {
+            uint8_t value = encoded_ploidy[i];
+            plo_miss[i] = value;
+            unsigned ploidy = read_ploidy(value);
+            if (ploidy < min_ploidy || ploidy > max_ploidy) {
+                bgen_error("sample ploidy outside genotype range");
+                goto err;
+            }
+            probability_bits += (uint64_t)nbits * counts[ploidy];
+            if ((probability_bits + 7) / 8 > payload_size) {
+                bgen_error("layout 2 probability data is truncated");
+                goto err;
+            }
         }
     }
     if ((probability_bits + 7) / 8 != payload_size) {
@@ -278,13 +306,15 @@ MAKE_READ_PHASED_GENOTYPE(32, float)
         int      aligned = (nbits % 8 == 0);                                                  \
         unsigned nbytes  = nbits / 8;                                                         \
         unsigned max_ncombs = genotype->ncombs;                                               \
+        unsigned combinations[64];                                                           \
+        for (unsigned ploidy = genotype->min_ploidy; ploidy <= genotype->max_ploidy; ++ploidy) \
+            checked_ncombs(ploidy, nalleles, &combinations[ploidy]);                          \
                                                                                               \
         uint64_t sample_start = 0;                                                            \
         for (uint32_t j = 0; j < genotype->nsamples; ++j) {                                   \
             FPTYPE*  pend = probs + max_ncombs;                                               \
             uint8_t  ploidy = read_ploidy(genotype->ploidy_missingness[j]);                   \
-            unsigned ncombs = 0;                                                              \
-            checked_ncombs(ploidy, nalleles, &ncombs);                                        \
+            unsigned ncombs = combinations[ploidy];                                           \
                                                                                               \
             if (read_missingness(genotype->ploidy_missingness[j]) != 0) {                     \
                 set_array_nan##BITS(probs, (size_t)(pend - probs));                           \

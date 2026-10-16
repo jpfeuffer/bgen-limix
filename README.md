@@ -81,6 +81,28 @@ their ploidy and missingness arrays. Both layouts support `precision=32` and
 `precision=64`; returned Python arrays remain valid after subsequent reads and
 after closing the file.
 
+### Performance checks
+
+`scripts/benchmark_decode.py` compares two Release shared-library builds through
+their exported native public APIs. It generates deterministic, compressed,
+biallelic diploid fixtures and measures single reads, batch reads, combination
+scans and indexing. Timings exclude fixture generation, initial output-buffer
+allocation and warm-up; old/new process order alternates across repetitions.
+For example, on macOS:
+
+```bash
+pixi run python scripts/benchmark_decode.py --generate build-benchmark/fixtures \
+  --zstd .pixi/envs/default/lib/libzstd.dylib
+pixi run python scripts/benchmark_decode.py \
+  --manifest build-benchmark/fixtures/fixtures.json \
+  --old /path/to/before/libbgen.dylib --new /path/to/after/libbgen.dylib \
+  --repeats 11 --loops 10 --output build-benchmark/results.json
+```
+
+Use matching compilers, optimization flags and compression libraries, and run
+without competing builds/tests. Results are local, warm-cache measurements, not
+a guarantee for other hardware, remote storage or arbitrary datasets.
+
 ## C API
 
 Link against the `bgen` library:
