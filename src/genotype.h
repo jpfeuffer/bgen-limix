@@ -24,9 +24,21 @@ struct bgen_genotype
     bool        owns_ploidy;  /**< if false, ploidy_missingness is owned by bgen_file */
 };
 
+static inline void bgen_genotype_release_buffers(struct bgen_genotype* genotype)
+{
+    if (genotype->owns_ploidy)
+        free(genotype->ploidy_missingness);
+    if (genotype->owns_chunk)
+        free(genotype->chunk);
+    genotype->ploidy_missingness = NULL;
+    genotype->chunk = NULL;
+}
+
 static inline struct bgen_genotype* bgen_genotype_create(void)
 {
     struct bgen_genotype* genotype = malloc(sizeof(struct bgen_genotype));
+    if (!genotype)
+        return NULL;
     genotype->layout = 0;
     genotype->nsamples = 0;
     genotype->nalleles = 0;
@@ -44,7 +56,7 @@ static inline struct bgen_genotype* bgen_genotype_create(void)
     return genotype;
 }
 
-/** Initialise a stack-allocated genotype (no heap allocation, no free needed). */
+/** Initialise a stack genotype; release owned buffers after reading. */
 static inline void bgen_genotype_init(struct bgen_genotype* genotype)
 {
     genotype->layout = 0;

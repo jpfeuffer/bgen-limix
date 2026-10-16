@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <cstring>
 #include <algorithm>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -55,6 +56,25 @@ static nb::object make_numpy_bool_1d(npy_intp n, bool** out_ptr) {
     if (!arr) throw std::bad_alloc();
     *out_ptr = static_cast<bool*>(PyArray_DATA((PyArrayObject*)arr));
     return nb::steal<nb::object>(arr);
+}
+
+static nb::object make_batch_array(std::initializer_list<npy_intp> shape, int type,
+                                   size_t item_size, void** data) {
+    std::vector<npy_intp> dims(shape);
+    size_t count = 1;
+    for (npy_intp dimension : dims) {
+        if (dimension < 0 || (dimension && count >
+            static_cast<size_t>(std::numeric_limits<npy_intp>::max()) /
+            static_cast<size_t>(dimension)))
+            throw nb::value_error("Batch dimensions overflow.");
+        count *= static_cast<size_t>(dimension);
+    }
+    if (count > static_cast<size_t>(std::numeric_limits<npy_intp>::max()) / item_size)
+        throw nb::value_error("Batch byte count overflow.");
+    PyObject* array = PyArray_EMPTY(static_cast<int>(dims.size()), dims.data(), type, 0);
+    if (!array) throw nb::python_error();
+    *data = PyArray_DATA(reinterpret_cast<PyArrayObject*>(array));
+    return nb::steal<nb::object>(array);
 }
 
 // --- Helper RAII wrappers ---
@@ -118,11 +138,11 @@ public:
 
     std::string filepath() const { return filepath_; }
 
-    uint32_t nvariants() const { return bgen_file_nvariants(handle_.ptr); }
+    uint32_t nvariants() const { return bgen_file_nvariants(file()); }
 
-    uint32_t nsamples() const { return bgen_file_nsamples(handle_.ptr); }
+    uint32_t nsamples() const { return bgen_file_nsamples(file()); }
 
-    unsigned layout() const { return bgen_file_layout(handle_.ptr); }
+    unsigned layout() const { return bgen_file_layout(file()); }
 
     bool contain_samples() const { return bgen_file_contain_samples(handle_.ptr); }
 
@@ -165,7 +185,7 @@ public:
     }
 
     nb::dict read_genotype(uint64_t offset) {
-        struct bgen_genotype* gt = bgen_file_open_genotype(handle_.ptr, offset);
+        struct bgen_genotype* gt = bgen_file_open_genotype(file(), offset);
         if (!gt)
             throw std::runtime_error("Could not open genotype at offset.");
 
@@ -204,7 +224,7 @@ public:
     }
 
     nb::dict read_genotype32(uint64_t offset) {
-        struct bgen_genotype* gt = bgen_file_open_genotype(handle_.ptr, offset);
+        struct bgen_genotype* gt = bgen_file_open_genotype(file(), offset);
         if (!gt)
             throw std::runtime_error("Could not open genotype at offset.");
 
@@ -246,7 +266,7 @@ public:
      *  without allocating or filling any probability array.
      */
     unsigned read_ncombs(uint64_t offset) {
-        struct bgen_genotype* gt = bgen_file_open_genotype(handle_.ptr, offset);
+        struct bgen_genotype* gt = bgen_file_open_genotype(file(), offset);
         if (!gt)
             throw std::runtime_error("read_ncombs: could not open genotype at offset.");
         unsigned nc = bgen_genotype_ncombs(gt);
@@ -266,66 +286,105 @@ public:
      * @return 1-D numpy uint32 array of length n_offsets.
      */
     nb::object get_ncombs(const std::vector<uint64_t>& offsets) {
-        uint32_t n = (uint32_t)offsets.size();
-        npy_intp dims[1] = {(npy_intp)n};
-        PyObject* arr = PyArray_EMPTY(1, dims, NPY_UINT32, 0);
-        if (!arr) throw std::bad_alloc();
-        uint32_t* out = static_cast<uint32_t*>(PyArray_DATA((PyArrayObject*)arr));
-        int err = bgen_file_read_ncombs_batch(handle_.ptr, offsets.data(), n, out);
-        if (err) {
-            Py_DECREF(arr);
+        uint32_t n = batch_size(offsets);
+        void* data;
+        auto array = make_batch_array({n}, NPY_UINT32, sizeof(uint32_t), &data);
+        int err = bgen_file_read_ncombs_batch(file(), offsets.data(), n,
+                                             static_cast<uint32_t*>(data));
+        if (err)
             throw std::runtime_error("get_ncombs: failed to read ncombs");
-        }
-        return nb::steal<nb::object>(arr);
+        return array;
     }
 
-    /**
-     * Read probabilities for multiple variants into a padded rectangular array.
-     *
-     * @param offsets   List/array of genotype offsets from the metafile.
-     * @param max_ncomb Maximum genotype combinations per sample.  Pass -1
-     *                  (default) to auto-detect by scanning all offsets.
-     * @return float64 numpy array of shape (n_variants, nsamples, max_ncomb).
-     *         Unused combination slots are NaN-filled.
-     */
-    nb::object read_genotypes_batch(const std::vector<uint64_t>& offsets, int32_t max_ncomb = -1) {
-        uint32_t n = (uint32_t)offsets.size();
-        if (n == 0) {
-            npy_intp dims[3] = {0, (npy_intp)nsamples(), 0};
-            PyObject* empty = PyArray_EMPTY(3, dims, NPY_DOUBLE, 0);
-            if (!empty) throw std::bad_alloc();
-            return nb::steal<nb::object>(empty);
-        }
+    nb::dict read_genotype_metadata(const std::vector<uint64_t>& offsets) {
+        uint32_t n = batch_size(offsets);
+        struct bgen_batch_metadata metadata{};
+        auto result = metadata_arrays(n, nsamples(), metadata);
+        if (bgen_file_read_genotype_metadata(file(), offsets.data(), n, &metadata))
+            throw std::runtime_error("Could not read genotype batch metadata.");
+        return result;
+    }
 
-        uint32_t ns = (uint32_t)nsamples();
-        uint32_t mnc;
+    nb::dict read_genotypes_batch_result(const std::vector<uint64_t>& offsets,
+                                         int64_t max_ncomb = -1, int precision = 64) {
+        uint32_t n = batch_size(offsets);
+        uint32_t ns = nsamples();
+        struct bgen_batch_metadata metadata{};
+        auto result = metadata_arrays(n, ns, metadata);
+        result["probability"] = read_batch_probabilities(offsets, max_ncomb, precision, &metadata);
+        return result;
+    }
 
-        if (max_ncomb < 0) {
-            /* Auto-detect: scan all offsets and take the maximum ncombs. */
-            std::vector<uint32_t> nc_arr(n);
-            int err = bgen_file_read_ncombs_batch(handle_.ptr, offsets.data(), n, nc_arr.data());
-            if (err)
-                throw std::runtime_error(
-                    "read_genotypes_batch: ncombs pre-scan failed");
-            mnc = *std::max_element(nc_arr.begin(), nc_arr.end());
-        } else {
-            mnc = (uint32_t)max_ncomb;
-        }
-
-        npy_intp dims[3] = {(npy_intp)n, (npy_intp)ns, (npy_intp)mnc};
-        PyObject* arr = PyArray_EMPTY(3, dims, NPY_DOUBLE, 0);
-        if (!arr) throw std::bad_alloc();
-        double* out = static_cast<double*>(PyArray_DATA((PyArrayObject*)arr));
-
-        int err = bgen_file_read_genotypes_batch_padded(handle_.ptr, offsets.data(), n, mnc, out);
-        if (err) {
-            Py_DECREF(arr);
-            throw std::runtime_error("read_genotypes_batch: padded batch failed");
-        }
-        return nb::steal<nb::object>(arr);
+    nb::object read_genotypes_batch(const std::vector<uint64_t>& offsets,
+                                    int64_t max_ncomb = -1) {
+        return read_batch_probabilities(offsets, max_ncomb, 64, nullptr);
     }
 
 private:
+    nb::object read_batch_probabilities(const std::vector<uint64_t>& offsets,
+                                        int64_t max_ncomb, int precision,
+                                        struct bgen_batch_metadata* metadata) {
+        uint32_t n = batch_size(offsets);
+        uint32_t ns = nsamples();
+        if (precision != 32 && precision != 64)
+            throw nb::value_error("Precision must be either 64 or 32.");
+        if (max_ncomb < -1 || max_ncomb > UINT32_MAX)
+            throw nb::value_error("max_ncomb must fit uint32.");
+        uint32_t width = max_ncomb == -1 ? 0 : static_cast<uint32_t>(max_ncomb);
+        if (max_ncomb == -1 && n) {
+            std::vector<uint32_t> counts(n);
+            if (bgen_file_read_ncombs_batch(file(), offsets.data(), n, counts.data()))
+                throw std::runtime_error("Could not scan genotype batch widths.");
+            width = *std::max_element(counts.begin(), counts.end());
+        }
+        void* out;
+        auto probabilities = make_batch_array(
+            {n, ns, width}, precision == 32 ? NPY_FLOAT : NPY_DOUBLE,
+            precision == 32 ? sizeof(float) : sizeof(double), &out);
+        int error = precision == 32 ?
+            bgen_file_read_genotypes_batch32(file(), offsets.data(), n, width,
+                                             static_cast<float*>(out), metadata) :
+            bgen_file_read_genotypes_batch64(file(), offsets.data(), n, width,
+                                             static_cast<double*>(out), metadata);
+        if (error)
+            throw std::runtime_error("Could not read genotype batch (invalid offset or max_ncomb).");
+        return probabilities;
+    }
+
+    struct bgen_file* file() const {
+        if (!handle_.ptr)
+            throw std::runtime_error("BGEN file is closed.");
+        return handle_.ptr;
+    }
+
+    uint32_t batch_size(const std::vector<uint64_t>& offsets) const {
+        file();
+        if (offsets.size() > UINT32_MAX)
+            throw nb::value_error("Too many batch offsets (uint32 limit).");
+        return static_cast<uint32_t>(offsets.size());
+    }
+
+    static nb::dict metadata_arrays(uint32_t n, uint32_t ns,
+                                     struct bgen_batch_metadata& metadata) {
+        nb::dict result;
+        void* data;
+        result["phased"] = make_batch_array({n}, NPY_BOOL, sizeof(bool), &data);
+        metadata.phased = static_cast<bool*>(data);
+        result["ploidy"] = make_batch_array({n, ns}, NPY_UINT8, sizeof(uint8_t), &data);
+        metadata.ploidy = static_cast<uint8_t*>(data);
+        result["missing"] = make_batch_array({n, ns}, NPY_BOOL, sizeof(bool), &data);
+        metadata.missing = static_cast<bool*>(data);
+        result["ncombs"] = make_batch_array({n}, NPY_UINT32, sizeof(uint32_t), &data);
+        metadata.ncombs = static_cast<uint32_t*>(data);
+        result["probability_count"] = make_batch_array({n, ns}, NPY_UINT32, sizeof(uint32_t), &data);
+        metadata.probability_count = static_cast<uint32_t*>(data);
+        result["nalleles"] = make_batch_array({n}, NPY_UINT16, sizeof(uint16_t), &data);
+        metadata.nalleles = static_cast<uint16_t*>(data);
+        result["nbits"] = make_batch_array({n}, NPY_UINT8, sizeof(uint8_t), &data);
+        metadata.nbits = static_cast<uint8_t*>(data);
+        return result;
+    }
+
     BgenFileHandle handle_;
     std::string filepath_;
 };
@@ -453,6 +512,9 @@ NB_MODULE(_core, m) {
              "without materialising the probability array.")
         .def("get_ncombs", &BgenFile::get_ncombs, "offsets"_a,
              "Return a uint32 array of ncombs values for each offset (header-only scan).")
+        .def("read_genotype_metadata", &BgenFile::read_genotype_metadata, "offsets"_a)
+        .def("read_genotypes_batch_result", &BgenFile::read_genotypes_batch_result,
+             "offsets"_a, "max_ncomb"_a = -1, "precision"_a = 64)
         .def("read_genotypes_batch", &BgenFile::read_genotypes_batch,
              "offsets"_a, "max_ncomb"_a = -1,
              "Read probabilities for multiple variants into a padded rectangular array. "

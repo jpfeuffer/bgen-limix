@@ -71,6 +71,94 @@ static void check_index(struct bgen_file* file, uint64_t const* offsets)
     cass_cond(bgen_metafile_close(mf) == 0);
 }
 
+static void check_batch(struct bgen_file* file, uint64_t const* offsets, unsigned width)
+{
+    uint64_t selected[3] = {offsets[1], offsets[0], offsets[1]};
+    bool phased[3], missing[6];
+    uint8_t ploidy[6], bits[3];
+    uint16_t alleles[3];
+    uint32_t counts[6], widths[3];
+    struct bgen_batch_metadata metadata = {
+        phased, ploidy, missing, widths, counts, alleles, bits
+    };
+    unsigned padded = width + 2;
+    double probabilities[48], exact[36];
+    float probabilities32[48];
+    cass_cond(bgen_file_read_genotypes_batch64(file, selected, 3, padded,
+                                              probabilities, &metadata) == 0);
+    cass_cond(bgen_file_read_genotypes_batch32(file, selected, 3, padded,
+                                              probabilities32, NULL) == 0);
+    cass_cond(bgen_file_read_genotypes_batch(file, selected, 3, width,
+                                            width ? exact : NULL) == 0);
+    for (unsigned i = 0; i < 3; ++i) {
+        struct bgen_genotype* gt = bgen_file_open_genotype(file, selected[i]);
+        cass_cond(gt != NULL);
+        if (!gt)
+            return;
+        double single[12];
+        float single32[12];
+        cass_cond(bgen_genotype_read64(gt, width ? single : NULL) == 0);
+        cass_cond(bgen_genotype_read32(gt, width ? single32 : NULL) == 0);
+        cass_cond(widths[i] == width);
+        cass_cond(phased[i] == bgen_genotype_phased(gt));
+        cass_cond(bits[i] == bgen_genotype_nbits(gt));
+        cass_cond(alleles[i] == (bgen_file_layout(file) == 1 ? 2 : 3));
+        for (unsigned s = 0; s < 2; ++s) {
+            cass_cond(ploidy[i * 2 + s] == bgen_genotype_ploidy(gt, s));
+            cass_cond(missing[i * 2 + s] == bgen_genotype_missing(gt, s));
+            unsigned p = ploidy[i * 2 + s];
+            unsigned expected = phased[i] ? p * alleles[i] :
+                (alleles[i] == 2 ? p + 1 : (p + 1) * (p + 2) / 2);
+            cass_cond(counts[i * 2 + s] == expected);
+            for (unsigned c = 0; c < padded; ++c) {
+                size_t index = (i * 2 + s) * padded + c;
+                if (c >= width) {
+                    cass_cond(isnan(probabilities[index]));
+                    cass_cond(isnan(probabilities32[index]));
+                } else {
+                    double want = single[s * width + c];
+                    float want32 = single32[s * width + c];
+                    cass_cond(isnan(want) ? isnan(probabilities[index]) :
+                        probabilities[index] == want);
+                    cass_cond(isnan(want32) ? isnan(probabilities32[index]) :
+                        probabilities32[index] == want32);
+                    cass_cond(isnan(want) ? isnan(exact[(i * 2 + s) * width + c]) :
+                        exact[(i * 2 + s) * width + c] == want);
+                }
+            }
+        }
+        bgen_genotype_close(gt);
+    }
+    memset(widths, 0xff, sizeof(widths));
+    cass_cond(bgen_file_read_genotype_metadata(file, selected, 3, &metadata) == 0);
+    for (unsigned i = 0; i < 3; ++i)
+        cass_cond(widths[i] == width);
+    cass_cond(bgen_file_read_genotype_metadata(file, selected, 3, NULL) == 0);
+    cass_cond(bgen_file_read_ncombs_batch(file, selected, 3, widths) == 0);
+    cass_cond(bgen_file_read_genotypes_batch_padded(file, selected, 3, padded,
+                                                   probabilities) == 0);
+    cass_cond(bgen_file_read_genotypes_batch64(file, NULL, 0, UINT32_MAX, NULL, NULL) == 0);
+    cass_cond(bgen_file_read_genotype_metadata(file, NULL, 0, NULL) == 0);
+    cass_cond(bgen_file_read_genotypes_batch64(NULL, selected, 1, width, NULL, NULL) != 0);
+    cass_cond(bgen_file_read_genotype_metadata(file, NULL, 1, NULL) != 0);
+    cass_cond(bgen_file_read_ncombs_batch(file, selected, 1, NULL) != 0);
+    cass_cond(bgen_file_read_genotypes_batch64(file, selected, UINT32_MAX,
+                                              UINT32_MAX, probabilities, NULL) != 0);
+    if (width) {
+        probabilities[0] = 42;
+        cass_cond(bgen_file_read_genotypes_batch64(file, selected, 1, width - 1,
+                                                  probabilities, NULL) != 0);
+        cass_cond(probabilities[0] == 42);
+        cass_cond(bgen_file_read_genotypes_batch64(file, selected, 1, width, NULL, NULL) != 0);
+    }
+    uint64_t invalid[2] = {offsets[0], UINT64_MAX};
+    cass_cond(bgen_file_read_genotype_metadata(file, invalid, 2, &metadata) != 0);
+    cass_cond(bgen_file_read_genotypes_batch32(file, invalid, 2, padded,
+                                              probabilities32, NULL) != 0);
+    cass_cond(bgen_file_read_genotypes_batch64(file, selected, 1, width,
+                                              width ? probabilities : NULL, &metadata) == 0);
+}
+
 static void test_layout1(void)
 {
     char const* path = "native_layouts.tmp/layout1.bgen";
@@ -92,6 +180,7 @@ static void test_layout1(void)
     if (!file)
         return;
     check_index(file, offsets);
+    check_batch(file, offsets, 3);
     struct bgen_genotype* first = bgen_file_open_genotype(file, offsets[0]);
     struct bgen_genotype* second = bgen_file_open_genotype(file, offsets[1]);
     cass_cond(first != NULL && second != NULL);
@@ -160,6 +249,7 @@ static void test_layout2(unsigned bits, unsigned phased, unsigned zero_ploidy)
     if (!file)
         return;
     check_index(file, offsets);
+    check_batch(file, offsets, zero_ploidy ? 0 : 6);
     for (unsigned record = 0; record < 2; ++record) {
         struct bgen_genotype* gt = bgen_file_open_genotype(file, offsets[record]);
         cass_cond(gt != NULL);

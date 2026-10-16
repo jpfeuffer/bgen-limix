@@ -3,6 +3,7 @@
 #include "bgen/genotype.h"
 #include "bgen/s3stream.h"
 #include "bstring.h"
+#include "bmath.h"
 #include "free.h"
 #include "genotype.h"
 #include "layout1.h"
@@ -160,18 +161,19 @@ err:
     return NULL;
 }
 
-struct bgen_genotype* bgen_file_open_genotype(struct bgen_file* bgen, uint64_t genotype_offset)
+static int open_genotype(struct bgen_file* bgen, uint64_t genotype_offset,
+                         struct bgen_genotype* genotype)
 {
-    struct bgen_genotype* genotype = bgen_genotype_create();
     genotype->layout = bgen->layout;
     genotype->offset = genotype_offset;
 
-    if (genotype_offset > INT64_MAX) {
-        bgen_error("variant offset overflow");
+    if (genotype_offset > INT64_MAX || genotype_offset < (uint64_t)bgen->variants_start) {
+        bgen_error("invalid genotype offset");
         goto err;
     }
 
-    if (stream_handle_seek(bgen_file_stream(bgen), (int64_t)genotype_offset, SEEK_SET)) {
+    if (stream_handle_tell(bgen->stream) != (int64_t)genotype_offset &&
+        stream_handle_seek(bgen_file_stream(bgen), (int64_t)genotype_offset, SEEK_SET)) {
         bgen_perror("could not fseek a variant");
         goto err;
     }
@@ -187,8 +189,24 @@ struct bgen_genotype* bgen_file_open_genotype(struct bgen_file* bgen, uint64_t g
         goto err;
     }
 
-    return genotype;
+    return 0;
 err:
+    return 1;
+}
+
+struct bgen_genotype* bgen_file_open_genotype(struct bgen_file* bgen, uint64_t genotype_offset)
+{
+    if (!bgen) {
+        bgen_error("file handle is NULL");
+        return NULL;
+    }
+    struct bgen_genotype* genotype = bgen_genotype_create();
+    if (!genotype) {
+        bgen_error("could not allocate genotype");
+        return NULL;
+    }
+    if (!open_genotype(bgen, genotype_offset, genotype))
+        return genotype;
     bgen_genotype_close(genotype);
     return NULL;
 }
@@ -292,188 +310,173 @@ uint8_t* bgen_file_ploidy_scratch(struct bgen_file* f)
     return f->ploidy_scratch;
 }
 
-int bgen_file_read_genotypes_batch(struct bgen_file* f, uint64_t const* offsets,
-                                   uint32_t n_offsets, uint32_t ncombs, double* out)
+static int copy_metadata(struct bgen_genotype const* gt, uint32_t index,
+                          struct bgen_batch_metadata* metadata)
 {
-    if (n_offsets == 0) return 0;
-    if (f->layout != 2) {
-        bgen_error("bgen_file_read_genotypes_batch only supports layout 2");
-        return 1;
-    }
-    if (f->compression == 0) {
-        bgen_error("bgen_file_read_genotypes_batch requires compressed layout 2");
-        return 1;
-    }
-
-    uint32_t nsamples = f->nsamples;
-
-    for (uint32_t i = 0; i < n_offsets; ++i) {
-        /* Skip seek if the file pointer is already at the right position.
-         * This happens naturally when iterating over pre-sorted offsets where
-         * the previous read left the pointer at the next metadata block
-         * and the caller already seeked here (or we got lucky on consecutive
-         * single-variant calls). */
-        int64_t cur_pos = stream_handle_tell(f->stream);
-        if (cur_pos < 0 || cur_pos != (int64_t)offsets[i]) {
-            if (stream_handle_seek(f->stream, (int64_t)offsets[i], SEEK_SET)) {
-                bgen_perror("batch: could not fseek to offset %" PRIu64, offsets[i]);
-                return 1;
+    if (!metadata)
+        return 0;
+    if (metadata->phased) metadata->phased[index] = gt->phased != 0;
+    if (metadata->ncombs) metadata->ncombs[index] = gt->ncombs;
+    if (metadata->nalleles) metadata->nalleles[index] = gt->nalleles;
+    if (metadata->nbits) metadata->nbits[index] = bgen_genotype_nbits(gt);
+    if (!metadata->ploidy && !metadata->missing && !metadata->probability_count)
+        return 0;
+    uint32_t counts[64];
+    if (metadata->probability_count) {
+        for (unsigned p = gt->min_ploidy; p <= gt->max_ploidy; ++p) {
+            if (gt->layout == 1)
+                counts[p] = 3;
+            else if (gt->phased)
+                counts[p] = p * gt->nalleles;
+            else {
+                unsigned count;
+                if (bgen_checked_ncombs(p, gt->nalleles, &count))
+                    return 1;
+                counts[p] = count;
             }
         }
-
-        /* Use stack-allocated genotype — no heap allocation per variant. */
-        struct bgen_genotype gt;
-        bgen_genotype_init(&gt);
-        gt.layout   = f->layout;
-        gt.nsamples = nsamples;
-
-        if (bgen_layout2_read_header(f, &gt)) {
-            bgen_error("batch: failed to read header at offset %" PRIu64, offsets[i]);
-            return 1;
-        }
-
-        if (gt.ncombs != ncombs) {
-            bgen_error("batch: ncombs mismatch at offset %" PRIu64
-                       " (expected %u, got %u)",
-                       offsets[i], ncombs, gt.ncombs);
-            return 1;
-        }
-
-        bgen_layout2_read_genotype64(&gt, out + (uint64_t)i * nsamples * ncombs);
-        /* gt.chunk and gt.ploidy_missingness are owned by f (scratch buffers).
-         * gt is on the stack — nothing to free. */
+    }
+    size_t start = (size_t)index * gt->nsamples;
+    for (uint32_t sample = 0; sample < gt->nsamples; ++sample) {
+        uint8_t value = gt->ploidy_missingness[sample];
+        uint8_t ploidy = value & 127;
+        if (metadata->ploidy) metadata->ploidy[start + sample] = ploidy;
+        if (metadata->missing) metadata->missing[start + sample] = value >> 7;
+        if (metadata->probability_count) metadata->probability_count[start + sample] = counts[ploidy];
     }
     return 0;
 }
 
-/* ---- Plan E: ncombs-scan batch (header-only, no probability decode) ---------- */
+static int read_batch(struct bgen_file* f, uint64_t const* offsets, uint32_t n_offsets,
+                      uint32_t width, void* out, unsigned precision, bool exact,
+                      struct bgen_batch_metadata* metadata)
+{
+    if (!f || (n_offsets && !offsets)) {
+        bgen_error("invalid batch file handle or offsets");
+        return 1;
+    }
+    size_t item_size = precision == 32 ? sizeof(float) : sizeof(double);
+    uint64_t rows = (uint64_t)n_offsets * f->nsamples;
+    if (rows > SIZE_MAX / sizeof(uint32_t) ||
+        (precision && width && rows > SIZE_MAX / item_size / width)) {
+        bgen_error("batch dimensions overflow");
+        return 1;
+    }
+    if (precision && rows && width && !out) {
+        bgen_error("batch probability output is NULL");
+        return 1;
+    }
+    bool padding_filled = false;
+    for (uint32_t i = 0; i < n_offsets; ++i) {
+        struct bgen_genotype gt;
+        bgen_genotype_init(&gt);
+        if (open_genotype(f, offsets[i], &gt))
+            goto err;
+        if (precision && (gt.ncombs > width || (exact && gt.ncombs != width))) {
+            bgen_error("batch max_ncomb=%u does not accommodate ncombs=%u at offset %" PRIu64,
+                       width, gt.ncombs, offsets[i]);
+            goto err;
+        }
+        if (copy_metadata(&gt, i, metadata))
+            goto err;
+        if (precision && f->nsamples && width) {
+            size_t slice_start = (size_t)i * f->nsamples * width;
+            char* slice = (char*)out + slice_start * item_size;
+            void* destination = slice;
+            if (gt.ncombs != width && gt.ncombs) {
+                size_t bytes = (size_t)f->nsamples * gt.ncombs * item_size;
+                size_t needed = bytes / sizeof(double) + (bytes % sizeof(double) != 0);
+                if (needed > SIZE_MAX / sizeof(double)) {
+                    bgen_error("batch scratch size overflow");
+                    goto err;
+                }
+                if (needed > f->prob_scratch_size) {
+                    double* p = realloc(f->prob_scratch, needed * sizeof(double));
+                    if (!p) {
+                        bgen_error("could not allocate padded batch scratch");
+                        goto err;
+                    }
+                    f->prob_scratch = p;
+                    f->prob_scratch_size = needed;
+                }
+                destination = f->prob_scratch;
+            }
+            int error = precision == 32 ? bgen_genotype_read32(&gt, destination) :
+                                          bgen_genotype_read64(&gt, destination);
+            if (error)
+                goto err;
+            if (gt.ncombs != width) {
+                if (!padding_filled) {
+                    /* Fill the untouched suffix once, keeping padding vectorizable. */
+                    size_t elements = (size_t)(n_offsets - i) * f->nsamples * width;
+                    if (precision == 32) {
+                        for (size_t c = 0; c < elements; ++c)
+                            ((float*)slice)[c] = NAN;
+                    } else {
+                        for (size_t c = 0; c < elements; ++c)
+                            ((double*)slice)[c] = NAN;
+                    }
+                    padding_filled = true;
+                }
+                if (gt.ncombs) {
+                    for (uint32_t s = 0; s < f->nsamples; ++s)
+                        memcpy(slice + (size_t)s * width * item_size,
+                               (char*)destination + (size_t)s * gt.ncombs * item_size,
+                               (size_t)gt.ncombs * item_size);
+                }
+            }
+        }
+        bgen_genotype_release_buffers(&gt);
+        continue;
+err:
+        bgen_genotype_release_buffers(&gt);
+        return 1;
+    }
+    return 0;
+}
+
+int bgen_file_read_genotypes_batch64(struct bgen_file* f, uint64_t const* offsets,
+                                     uint32_t n_offsets, uint32_t width, double* out,
+                                     struct bgen_batch_metadata* metadata)
+{
+    return read_batch(f, offsets, n_offsets, width, out, 64, false, metadata);
+}
+
+int bgen_file_read_genotypes_batch32(struct bgen_file* f, uint64_t const* offsets,
+                                     uint32_t n_offsets, uint32_t width, float* out,
+                                     struct bgen_batch_metadata* metadata)
+{
+    return read_batch(f, offsets, n_offsets, width, out, 32, false, metadata);
+}
+
+int bgen_file_read_genotype_metadata(struct bgen_file* f, uint64_t const* offsets,
+                                     uint32_t n_offsets, struct bgen_batch_metadata* metadata)
+{
+    return read_batch(f, offsets, n_offsets, 0, NULL, 0, false, metadata);
+}
+
+int bgen_file_read_genotypes_batch(struct bgen_file* f, uint64_t const* offsets,
+                                   uint32_t n_offsets, uint32_t ncombs, double* out)
+{
+    return read_batch(f, offsets, n_offsets, ncombs, out, 64, true, NULL);
+}
 
 int bgen_file_read_ncombs_batch(struct bgen_file* f, uint64_t const* offsets,
                                 uint32_t n_offsets, uint32_t* ncombs_out)
 {
-    if (n_offsets == 0) return 0;
-    if (f->layout != 2) {
-        bgen_error("bgen_file_read_ncombs_batch only supports layout 2");
+    if (n_offsets && !ncombs_out) {
+        bgen_error("batch ncombs output is NULL");
         return 1;
     }
-    if (f->compression == 0) {
-        bgen_error("bgen_file_read_ncombs_batch requires compressed layout 2");
-        return 1;
-    }
-
-    uint32_t nsamples = f->nsamples;
-
-    for (uint32_t i = 0; i < n_offsets; ++i) {
-        int64_t cur_pos = stream_handle_tell(f->stream);
-        if (cur_pos < 0 || cur_pos != (int64_t)offsets[i]) {
-            if (stream_handle_seek(f->stream, (int64_t)offsets[i], SEEK_SET)) {
-                bgen_perror("ncombs_batch: could not fseek to offset %" PRIu64, offsets[i]);
-                return 1;
-            }
-        }
-
-        struct bgen_genotype gt;
-        bgen_genotype_init(&gt);
-        gt.layout   = f->layout;
-        gt.nsamples = nsamples;
-
-        if (bgen_layout2_read_header(f, &gt)) {
-            bgen_error("ncombs_batch: failed to read header at offset %" PRIu64, offsets[i]);
-            return 1;
-        }
-
-        ncombs_out[i] = gt.ncombs;
-        /* Chunk owned by f->chunk_scratch — nothing to free. */
-    }
-    return 0;
+    struct bgen_batch_metadata metadata = {0};
+    metadata.ncombs = ncombs_out;
+    return bgen_file_read_genotype_metadata(f, offsets, n_offsets, &metadata);
 }
 
-/* ---- Plan E: padded batch (NaN-fills unused ncombs slots per variant) -------- */
-
 int bgen_file_read_genotypes_batch_padded(struct bgen_file* f, uint64_t const* offsets,
-                                          uint32_t n_offsets, uint32_t max_ncombs,
-                                          double* out)
+                                          uint32_t n_offsets, uint32_t width, double* out)
 {
-    if (n_offsets == 0) return 0;
-    if (max_ncombs == 0) {
-        bgen_error("bgen_file_read_genotypes_batch_padded: max_ncombs cannot be zero");
-        return 1;
-    }
-    if (f->layout != 2) {
-        bgen_error("bgen_file_read_genotypes_batch_padded only supports layout 2");
-        return 1;
-    }
-    if (f->compression == 0) {
-        bgen_error("bgen_file_read_genotypes_batch_padded requires compressed layout 2");
-        return 1;
-    }
-
-    uint32_t nsamples = f->nsamples;
-
-    /* Pre-fill the entire output buffer with NaN so that unused padding slots
-     * are already correct without per-variant bookkeeping. */
-    uint64_t total = (uint64_t)n_offsets * nsamples * max_ncombs;
-    for (uint64_t k = 0; k < total; ++k) out[k] = NAN;
-
-    for (uint32_t i = 0; i < n_offsets; ++i) {
-        int64_t cur_pos = stream_handle_tell(f->stream);
-        if (cur_pos < 0 || cur_pos != (int64_t)offsets[i]) {
-            if (stream_handle_seek(f->stream, (int64_t)offsets[i], SEEK_SET)) {
-                bgen_perror("padded_batch: could not fseek to offset %" PRIu64, offsets[i]);
-                return 1;
-            }
-        }
-
-        struct bgen_genotype gt;
-        bgen_genotype_init(&gt);
-        gt.layout   = f->layout;
-        gt.nsamples = nsamples;
-
-        if (bgen_layout2_read_header(f, &gt)) {
-            bgen_error("padded_batch: failed to read header at offset %" PRIu64, offsets[i]);
-            return 1;
-        }
-
-        if (gt.ncombs > max_ncombs) {
-            bgen_error("padded_batch: variant at offset %" PRIu64
-                       " has ncombs=%u which exceeds max_ncombs=%u",
-                       offsets[i], gt.ncombs, max_ncombs);
-            return 1;
-        }
-
-        double* slice = out + (uint64_t)i * nsamples * max_ncombs;
-
-        if (gt.ncombs == max_ncombs) {
-            /* No padding needed — decode directly into the output slice. */
-            bgen_layout2_read_genotype64(&gt, slice);
-        } else {
-            /* ncombs < max_ncombs: decode into prob_scratch, then scatter each
-             * sample's probabilities into the wider padded row. */
-            uint64_t scratch_needed = (uint64_t)nsamples * gt.ncombs;
-            if (scratch_needed > f->prob_scratch_size) {
-                double* p = realloc(f->prob_scratch, scratch_needed * sizeof(double));
-                if (!p) {
-                    bgen_error("padded_batch: could not realloc prob_scratch");
-                    return 1;
-                }
-                f->prob_scratch      = p;
-                f->prob_scratch_size = scratch_needed;
-            }
-
-            bgen_layout2_read_genotype64(&gt, f->prob_scratch);
-
-            /* Scatter: copy each sample's ncombs probabilities into the
-             * appropriate slot; the remaining (max_ncombs - ncombs) slots
-             * were already set to NaN by the pre-fill above. */
-            uint32_t nc = gt.ncombs;
-            for (uint32_t s = 0; s < nsamples; ++s) {
-                memcpy(slice + (uint64_t)s * max_ncombs,
-                       f->prob_scratch + (uint64_t)s * nc,
-                       nc * sizeof(double));
-            }
-        }
-    }
-    return 0;
+    return bgen_file_read_genotypes_batch64(f, offsets, n_offsets, width, out, NULL);
 }
 
 static struct bgen_file* bgen_file_create(char const* filepath)

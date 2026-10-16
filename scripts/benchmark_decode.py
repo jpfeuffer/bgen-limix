@@ -8,11 +8,14 @@ Fixture generation, process startup, output-buffer setup and warm-up are not tim
 import argparse
 import ctypes as ct
 import json
+import math
+import os
 import random
 import statistics
 import struct
 import subprocess
 import sys
+import sysconfig
 import time
 import zlib
 from pathlib import Path
@@ -107,12 +110,17 @@ def worker(library, case, mode, loops):
         "bgen_file_open_genotype": ([ct.c_void_p, ct.c_uint64], ct.c_void_p),
         "bgen_genotype_close": ([ct.c_void_p], None),
         "bgen_genotype_read64": ([ct.c_void_p, ct.c_void_p], ct.c_int),
+        "bgen_genotype_read32": ([ct.c_void_p, ct.c_void_p], ct.c_int),
         "bgen_file_read_genotypes_batch": (
             [ct.c_void_p, ct.c_void_p, ct.c_uint32, ct.c_uint32, ct.c_void_p],
             ct.c_int,
         ),
         "bgen_file_read_ncombs_batch": (
             [ct.c_void_p, ct.c_void_p, ct.c_uint32, ct.c_void_p],
+            ct.c_int,
+        ),
+        "bgen_file_read_genotypes_batch_padded": (
+            [ct.c_void_p, ct.c_void_p, ct.c_uint32, ct.c_uint32, ct.c_void_p],
             ct.c_int,
         ),
         "bgen_metafile_create": (
@@ -127,22 +135,38 @@ def worker(library, case, mode, loops):
     handle = lib.bgen_file_open(case["path"].encode())
     assert handle
     offsets = (ct.c_uint64 * case["nvariants"])(*case["offsets"])
-    n = case["nsamples"] * case["ncombs"]
-    result = (ct.c_double * (n * (case["nvariants"] if mode == "batch" else 1)))()
+    width = case["ncombs"] + (2 if mode == "padded" else 0)
+    n = case["nsamples"] * width
+    scalar = ct.c_float if mode == "single32" else ct.c_double
+    result = (
+        scalar * (n * (case["nvariants"] if mode in ("batch", "padded") else 1))
+    )()
     counts = (ct.c_uint32 * case["nvariants"])()
     index = (case["path"] + ".metafile").encode()
 
     def run():
-        if mode == "single":
+        if mode in ("single", "single32"):
             for offset in offsets:
                 genotype = lib.bgen_file_open_genotype(handle, offset)
                 assert genotype
-                assert lib.bgen_genotype_read64(genotype, result) == 0
+                decode = (
+                    lib.bgen_genotype_read32
+                    if mode == "single32"
+                    else lib.bgen_genotype_read64
+                )
+                assert decode(genotype, result) == 0
                 lib.bgen_genotype_close(genotype)
         elif mode == "batch":
             assert (
                 lib.bgen_file_read_genotypes_batch(
                     handle, offsets, case["nvariants"], case["ncombs"], result
+                )
+                == 0
+            )
+        elif mode == "padded":
+            assert (
+                lib.bgen_file_read_genotypes_batch_padded(
+                    handle, offsets, case["nvariants"], width, result
                 )
                 == 0
             )
@@ -165,7 +189,59 @@ def worker(library, case, mode, loops):
         run()
     elapsed = (time.perf_counter() - start) / loops
     lib.bgen_file_close(handle)
-    print(json.dumps({"seconds": elapsed, "checksum": sum(result[:16])}))
+    print(
+        json.dumps(
+            {
+                "seconds": elapsed,
+                "checksum": sum(x for x in result[:16] if not math.isnan(x)),
+            }
+        )
+    )
+
+
+def python_worker(package, case, mode, loops):
+    """Run with -S and an explicit installed package, bypassing editable hooks."""
+    sys.path.insert(0, str(package))
+    from cbgen import BgenFile, bgen_file
+
+    with BgenFile(case["path"]) as modern, bgen_file(case["path"]) as legacy:
+
+        def run():
+            if mode in ("single", "single32"):
+                for offset in case["offsets"]:
+                    result = modern.read_genotype(
+                        offset, precision=32 if mode == "single32" else 64
+                    ).probability
+                return float(result[0].sum())
+            if mode in ("batch", "padded"):
+                width = case["ncombs"] + (2 if mode == "padded" else 0)
+                result = legacy.read_genotypes_batch(case["offsets"], max_ncomb=width)
+                return float(result[0, 0, : case["ncombs"]].sum())
+            if mode == "structured":
+                result = modern.read_genotypes_batch(
+                    case["offsets"], max_ncomb=case["ncombs"], precision=64
+                )
+                return float(result.probability[0, 0].sum())
+            if mode == "metadata":
+                result = modern.read_genotype_metadata(case["offsets"])
+                return int(result.ncombs.sum())
+            if mode == "scan":
+                result = legacy.get_ncombs(case["offsets"])
+                return int(result.sum())
+            raise ValueError(f"Unsupported Python benchmark mode: {mode}")
+
+        checksum = run()
+        start = time.perf_counter()
+        for _ in range(loops):
+            run()
+        print(
+            json.dumps(
+                {
+                    "seconds": (time.perf_counter() - start) / loops,
+                    "checksum": checksum,
+                }
+            )
+        )
 
 
 def main():
@@ -181,6 +257,18 @@ def main():
     parser.add_argument("--loops", type=int, default=3)
     parser.add_argument("--old")
     parser.add_argument("--new")
+    parser.add_argument(
+        "--python-old", type=Path, help="Installed baseline package directory"
+    )
+    parser.add_argument(
+        "--python-new", type=Path, help="Installed current package directory"
+    )
+    parser.add_argument("--python-worker", type=Path)
+    parser.add_argument(
+        "--modes",
+        nargs="+",
+        default=["single", "single32", "batch", "padded", "scan", "index"],
+    )
     parser.add_argument("--repeats", type=int, default=7)
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
@@ -194,19 +282,36 @@ def main():
         return
     if not args.manifest:
         parser.error("--manifest is required")
-    if not args.worker and (not args.old or not args.new):
+    python_mode = args.python_old is not None or args.python_new is not None
+    if python_mode and not (args.python_old and args.python_new):
+        parser.error("Python comparison requires both installed package directories")
+    if (
+        not args.worker
+        and not args.python_worker
+        and not python_mode
+        and (not args.old or not args.new)
+    ):
         parser.error("comparison requires --old and --new")
-    if args.worker and (
-        args.case is None or args.mode not in ("single", "batch", "scan", "index")
+    worker_modes = {"single", "single32", "batch", "padded", "scan", "index"}
+    if args.python_worker:
+        worker_modes = worker_modes - {"index"} | {"structured", "metadata"}
+    if (args.worker or args.python_worker) and (
+        args.case is None or args.mode not in worker_modes
     ):
         parser.error("worker requires --case and a valid --mode")
     cases = json.loads(args.manifest.read_text())
     if args.worker:
         worker(args.worker, cases[args.case], args.mode, args.loops)
         return
+    if args.python_worker:
+        python_worker(args.python_worker, cases[args.case], args.mode, args.loops)
+        return
+    valid_modes = {"single", "single32", "batch", "padded", "scan", "index"}
+    if not set(args.modes) <= valid_modes or (python_mode and "index" in args.modes):
+        parser.error("Invalid modes (Python supports all modes except index)")
     report = []
     for i, case in enumerate(cases):
-        for mode in ["single", "batch", "scan", "index"]:
+        for mode in args.modes:
             times = {"old": [], "new": []}
             checksums = set()
             for repeat in range(args.repeats):
@@ -214,9 +319,10 @@ def main():
                 for label in order:
                     command = [
                         sys.executable,
+                        *(["-S"] if python_mode else []),
                         __file__,
-                        "--worker",
-                        getattr(args, label),
+                        "--python-worker" if python_mode else "--worker",
+                        str(getattr(args, f"python_{label}" if python_mode else label)),
                         "--manifest",
                         str(args.manifest),
                         "--case",
@@ -226,8 +332,19 @@ def main():
                         "--loops",
                         str(args.loops),
                     ]
+                    env = None
+                    if python_mode:
+                        env = dict(
+                            os.environ,
+                            PYTHONPATH=os.pathsep.join(
+                                {
+                                    sysconfig.get_path("platlib"),
+                                    sysconfig.get_path("purelib"),
+                                }
+                            ),
+                        )
                     measurement = json.loads(
-                        subprocess.check_output(command, text=True)
+                        subprocess.check_output(command, text=True, env=env)
                     )
                     times[label].append(measurement["seconds"])
                     checksums.add(measurement["checksum"])

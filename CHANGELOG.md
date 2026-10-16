@@ -1,5 +1,39 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Modern `BgenFile.read_genotypes_batch(offsets, max_ncomb=None, precision=64)`
+  returning `GenotypeBatchResult`: owned contiguous probabilities and columnar
+  phase, ploidy, missingness, allele/bit counts, declared variant widths and
+  structural per-sample probability lengths. Supports both layouts, every
+  supported compression method, float32/64 and zero-width phased records.
+- Public native structured float32/64 batch and metadata APIs sharing the
+  single-record header/decoding core, with checked dimensions, bounded
+  one-variant scratch, explicit padding capacity and NaN padding.
+- `BgenFile.read_genotype_metadata` and `get_ncombs` for discovery without
+  probability decoding. Compressed layout-2 blocks still decompress; automatic
+  batch sizing scans widths before the decode pass.
+
+### Fixed
+
+- Support layout-1 raw/zlib and raw layout-2 records in existing native and legacy
+  Python batch/count APIs, preserving probability-only legacy return values and
+  avoiding metadata work on paths that do not request it.
+- Reject invalid batch offsets, insufficient/overflowing widths and use after
+  reader closure explicitly. Preserve requested ordering and duplicates, exact
+  layout-1 rounding, original missingness and result ownership after close.
+
+### Performance
+
+- Keep probability-only and width-only paths free of new metadata allocation
+  and copying. Reuse native decode/decompression scratch and initialize padded
+  output with lazy contiguous NaN fills rather than slower per-row tail loops.
+- Extend the reproducible comparison tool to float32 single reads, wider padded
+  batches and actual installed Python packages, using pre-change 4.12.0 as the
+  baseline for this API work.
+
 ## 4.12.0 - 2026-10-16
 
 ### Fixed

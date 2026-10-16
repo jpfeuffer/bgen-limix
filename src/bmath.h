@@ -43,4 +43,24 @@ static inline unsigned choose(unsigned n, unsigned k)
     return ans;
 }
 
+static inline int bgen_checked_ncombs(unsigned ploidy, unsigned nalleles, unsigned* result)
+{
+    if (nalleles <= 2) {
+        *result = nalleles == 1 ? 1 : ploidy + 1;
+        return 0;
+    }
+    unsigned n = ploidy + nalleles - 1;
+    unsigned k = ploidy < nalleles - 1 ? ploidy : nalleles - 1;
+    uint64_t count = 1;
+    for (unsigned i = 1; i <= k; ++i) {
+        count = count * (n - i + 1) / i;
+        if (count > UINT_MAX) {
+            bgen_error("genotype combination count overflow");
+            return 1;
+        }
+    }
+    *result = (unsigned)count;
+    return 0;
+}
+
 #endif

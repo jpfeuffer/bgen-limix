@@ -11,18 +11,27 @@ from cbgen._core import BgenFile as _BgenFile
 from cbgen._core import BgenMetafile, PartitionResult, VariantInfo
 from cbgen._s3_utils import s3_env_from_storage_options
 from cbgen.example import BGEN_CACHE_HOME
-from cbgen.typing import Genotype, GenotypeResult, Partition, Variants
+from cbgen.typing import (
+    Genotype,
+    GenotypeBatchMetadata,
+    GenotypeBatchResult,
+    GenotypeResult,
+    Partition,
+    Variants,
+)
 
 __all__ = [
     "BGEN_CACHE_HOME",
     "BgenFile",
     "BgenMetafile",
     "Genotype",
+    "GenotypeBatchMetadata",
+    "GenotypeBatchResult",
     "GenotypeResult",
     "Partition",
     "PartitionResult",
-    "Variants",
     "VariantInfo",
+    "Variants",
     "__version__",
     "bgen_file",
     "bgen_metafile",
@@ -141,6 +150,63 @@ class BgenFile:
         Number of genotype combinations (int).
         """
         return int(self._impl.read_ncombs(offset))
+
+    def get_ncombs(self, offsets: list[int]):
+        """Read uint32 row widths (V,) without decoding probabilities.
+
+        Supports all layouts and compression methods. Compressed layout-2
+        blocks are still decompressed. Ordering and duplicates are preserved.
+        """
+        return self._impl.get_ncombs(offsets)
+
+    def read_genotype_metadata(self, offsets: list[int]) -> GenotypeBatchMetadata:
+        """Read metadata for requested offsets without decoding probabilities.
+
+        Supports both layouts and all supported compression methods.
+        Compressed layout 2 still decompresses the block; layout 1 reads its
+        triplets to determine missingness. Does not allocate probability arrays.
+        Validates framing, headers and encoded payload lengths, not numerical
+        probability sums or application-specific probability tolerances.
+        Output shapes are (V,) and (V, nsamples), including for empty input.
+        All arrays remain valid after later reads or closing the file.
+        """
+        return GenotypeBatchMetadata(**self._impl.read_genotype_metadata(offsets))
+
+    def read_genotypes_batch(
+        self,
+        offsets: list[int],
+        max_ncomb: int | None = None,
+        precision: int = 64,
+    ) -> GenotypeBatchResult:
+        """Decode a native structured batch across all supported encodings.
+
+        ``offsets`` select original genotype blocks, preserving order and
+        duplicates. ``max_ncomb`` is the padded width W; None scans requested
+        widths first, then reads each block again to decode. An explicit
+        uint32 width avoids that scan and reads/decompresses each block once.
+        A width smaller than any requested single-reader width raises an error.
+        Probability dtype is float64 (default) or float32.
+
+        Returns probabilities (V, nsamples, W) and per-variant/sample metadata;
+        see GenotypeBatchResult for field shapes and padding semantics.
+        Empty input returns (0, nsamples, W), with W=0 if auto-sized. A wholly
+        zero-ploidy phased batch may also have W=0. Allocation is limited to
+        the requested batch and checked for dimension/byte-count overflow.
+        Arrays are C-contiguous, independently owned and stable after close.
+        Output storage is V*nsamples*W*itemsize bytes plus 6*V*nsamples+8*V
+        metadata bytes. Native scratch holds at most one genotype block and
+        one variant's decoded probabilities; no second full batch is built.
+        Request float64 when deriving dosage before a later float32 cast.
+        """
+        if precision not in (64, 32):
+            raise ValueError("Precision must be either 64 or 32.")
+        if max_ncomb is not None and not 0 <= max_ncomb <= 2**32 - 1:
+            raise ValueError("max_ncomb must be an unsigned 32-bit width.")
+        return GenotypeBatchResult(
+            **self._impl.read_genotypes_batch_result(
+                offsets, -1 if max_ncomb is None else max_ncomb, precision
+            )
+        )
 
     def close(self) -> None:
         self._impl.close()

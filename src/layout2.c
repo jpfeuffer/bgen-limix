@@ -41,26 +41,6 @@ static inline void set_array_nan32(float* p, size_t n)
         p[i] = NAN;
 }
 
-static int checked_ncombs(unsigned ploidy, unsigned nalleles, unsigned* result)
-{
-    if (nalleles <= 2) {
-        *result = nalleles == 1 ? 1 : ploidy + 1;
-        return 0;
-    }
-    unsigned n = ploidy + nalleles - 1;
-    unsigned k = ploidy < nalleles - 1 ? ploidy : nalleles - 1;
-    uint64_t count = 1;
-    for (unsigned i = 1; i <= k; ++i) {
-        count = count * (n - i + 1) / i;
-        if (count > UINT_MAX) {
-            bgen_error("genotype combination count overflow");
-            return 1;
-        }
-    }
-    *result = (unsigned)count;
-    return 0;
-}
-
 int bgen_layout2_read_header(struct bgen_file* bgen_file, struct bgen_genotype* genotype)
 {
     uint32_t nsamples = 0;
@@ -140,7 +120,7 @@ int bgen_layout2_read_header(struct bgen_file* bgen_file, struct bgen_genotype* 
 
     if (phased)
         genotype->ncombs = (unsigned)nalleles * (unsigned)genotype->max_ploidy;
-    else if (checked_ncombs(max_ploidy, nalleles, &genotype->ncombs))
+    else if (bgen_checked_ncombs(max_ploidy, nalleles, &genotype->ncombs))
         goto err;
 
     uint64_t probability_bits = 0;
@@ -170,7 +150,7 @@ int bgen_layout2_read_header(struct bgen_file* bgen_file, struct bgen_genotype* 
             if (phased)
                 counts[ploidy] = ploidy * (unsigned)(nalleles - 1);
             else {
-                if (checked_ncombs(ploidy, nalleles, &counts[ploidy]))
+                if (bgen_checked_ncombs(ploidy, nalleles, &counts[ploidy]))
                     goto err;
                 --counts[ploidy];
             }
@@ -308,7 +288,7 @@ MAKE_READ_PHASED_GENOTYPE(32, float)
         unsigned max_ncombs = genotype->ncombs;                                               \
         unsigned combinations[64];                                                           \
         for (unsigned ploidy = genotype->min_ploidy; ploidy <= genotype->max_ploidy; ++ploidy) \
-            checked_ncombs(ploidy, nalleles, &combinations[ploidy]);                          \
+            bgen_checked_ncombs(ploidy, nalleles, &combinations[ploidy]);                     \
                                                                                               \
         uint64_t sample_start = 0;                                                            \
         for (uint32_t j = 0; j < genotype->nsamples; ++j) {                                   \

@@ -201,6 +201,8 @@ class bgen_file:
         """
         if max_ncomb is None:
             return self._impl.read_genotypes_batch(offsets)
+        if not 0 <= max_ncomb <= 2**32 - 1:
+            raise ValueError("max_ncomb must be an unsigned 32-bit width.")
         return self._impl.read_genotypes_batch(offsets, max_ncomb)
 
     def close(self):

@@ -6,7 +6,14 @@ from typing import Union
 import numpy as np
 import numpy.typing as npt
 
-__all__ = ["GenotypeResult", "Genotype", "Variants", "Partition"]
+__all__ = [
+    "Genotype",
+    "GenotypeBatchMetadata",
+    "GenotypeBatchResult",
+    "GenotypeResult",
+    "Partition",
+    "Variants",
+]
 
 
 @dataclass
@@ -34,6 +41,44 @@ class GenotypeResult:
 
 # Legacy alias for API compatibility with the old cbgen package.
 Genotype = GenotypeResult
+
+
+@dataclass
+class GenotypeBatchMetadata:
+    """Metadata for V requested variants and S samples, in requested order.
+
+    ``phased``, ``ncombs``, ``nalleles`` and ``nbits`` have shape (V,).
+    ``ploidy``, ``missing`` and ``probability_count`` have shape (V, S).
+    ``ncombs`` is the single-reader row width for each variant, computed from
+    declared maximum ploidy (which may exceed all actual sample ploidies).
+    ``probability_count`` is each sample's structural width, independent of
+    missingness: ploidy * nalleles if phased, otherwise the number of unordered
+    genotypes (one for zero-ploidy unphased samples). Missingness is never
+    inferred from NaNs or padding. ``nbits`` is fixed at 16 for layout 1.
+    All arrays are C-contiguous and own their data.
+    """
+
+    phased: npt.NDArray[np.bool_]
+    ploidy: npt.NDArray[np.uint8]
+    missing: npt.NDArray[np.bool_]
+    ncombs: npt.NDArray[np.uint32]
+    probability_count: npt.NDArray[np.uint32]
+    nalleles: npt.NDArray[np.uint16]
+    nbits: npt.NDArray[np.uint8]
+
+
+@dataclass
+class GenotypeBatchResult(GenotypeBatchMetadata):
+    """Decoded batch with probabilities of shape (V, S, W).
+
+    The first ncombs[v] columns match a single-record read exactly. Remaining
+    batch-width slots and unused sample-width slots are NaN. Missing samples
+    are also NaN: use missing/probability_count to distinguish missingness and
+    structural padding. Phased rows flatten haplotype-major allele
+    probabilities, just like GenotypeResult.
+    """
+
+    probability: npt.NDArray[np.float64] | npt.NDArray[np.float32]
 
 
 class Variants:
@@ -166,5 +211,3 @@ class Partition:
 
     offset: int
     variants: Variants
-
-
