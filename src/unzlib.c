@@ -57,6 +57,10 @@ int bgen_unzlib_reuse(bgen_zlib_ctx* ctx, char const* src, size_t src_size, char
         bgen_error("zlib-ng inflate failed (%s)", zng_zError(e));
         return 1;
     }
+    if (strm->total_out != *dst_size || strm->avail_in != 0) {
+        bgen_error("zlib-ng genotype length mismatch");
+        return 1;
+    }
     return 0;
 }
 
@@ -93,6 +97,10 @@ int bgen_unzlib(char const* src, size_t src_size, char** dst, size_t* dst_size)
     e = zng_inflate(&strm, Z_FINISH);
     if (e != Z_STREAM_END) {
         bgen_error("zlib-ng failed to inflate (%s)", zng_zError(e));
+        goto err;
+    }
+    if (strm.total_out != *dst_size || strm.avail_in != 0) {
+        bgen_error("zlib-ng genotype length mismatch");
         goto err;
     }
 

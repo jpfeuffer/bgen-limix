@@ -227,7 +227,7 @@ int bgen_file_decompress_block(struct bgen_file* f, char** chunk, size_t* size)
 {
     char* compressed = NULL;
 
-    size_t compressed_length = 0;
+    uint32_t compressed_length = 0;
     if (bgen_stream_fread(f->stream, &compressed_length, 4) < 1) {
         bgen_perror_eof(stream_handle_eof(f->stream), "could not read compressed length");
         goto err;
@@ -238,7 +238,7 @@ int bgen_file_decompress_block(struct bgen_file* f, char** chunk, size_t* size)
     }
     compressed_length -= 4;
 
-    size_t uncompressed_length = 0;
+    uint32_t uncompressed_length = 0;
     if (bgen_stream_fread(f->stream, &uncompressed_length, 4) < 1) {
         bgen_perror_eof(stream_handle_eof(f->stream), "could not read uncompressed length");
         goto err;
@@ -525,6 +525,10 @@ static int bgen_file_read_header(struct bgen_file* bgen)
         bgen_perror_eof(stream_handle_eof(bgen->stream), "could not read header length");
         return 1;
     }
+    if (header_length < 20 || (uint64_t)header_length + 4 > (uint64_t)bgen->variants_start) {
+        bgen_error("invalid bgen header length or variant offset");
+        return 1;
+    }
 
     if (bgen_stream_fread(bgen->stream, &bgen->nvariants, sizeof(bgen->nvariants)) != 1) {
         bgen_perror_eof(stream_handle_eof(bgen->stream), "could not read number of variants");
@@ -541,8 +545,10 @@ static int bgen_file_read_header(struct bgen_file* bgen)
         return 1;
     }
 
-    if (magic_number != 1852139362)
-        bgen_warning("magic number mismatch");
+    if (magic_number != 1852139362 && magic_number != 0) {
+        bgen_error("magic number mismatch");
+        return 1;
+    }
 
     if (stream_handle_seek(bgen->stream, header_length - 20, SEEK_CUR)) {
         bgen_perror("fseek error while reading bgen file");
@@ -557,6 +563,12 @@ static int bgen_file_read_header(struct bgen_file* bgen)
     bgen->compression = flags & 3;
     bgen->layout = (flags & (15 << 2)) >> 2;
     bgen->contain_sample = ((flags & ((uint32_t)1 << 31)) >> 31) == 1;
+    if ((flags & ~UINT32_C(0x8000003f)) != 0 ||
+        (bgen->layout != 1 && bgen->layout != 2) || bgen->compression > 2 ||
+        (bgen->layout == 1 && bgen->compression > 1)) {
+        bgen_error("unsupported bgen flags: %" PRIu32, flags);
+        return 1;
+    }
 
     return 0;
 }

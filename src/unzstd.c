@@ -38,6 +38,10 @@ int bgen_unzstd_reuse(bgen_zstd_ctx* ctx, char const* src, size_t src_size, void
         bgen_error("zstd decoding (%s)", ZSTD_getErrorName(dSize));
         return 1;
     }
+    if (dSize != *dst_size) {
+        bgen_error("zstd genotype length mismatch");
+        return 1;
+    }
     return 0;
 }
 
@@ -47,6 +51,10 @@ int bgen_unzstd(char const* src, size_t src_size, void** dst, size_t* dst_size)
 
     if (ZSTD_isError(dSize)) {
         bgen_error("zstd decoding (%s)", ZSTD_getErrorName(dSize));
+        return 1;
+    }
+    if (dSize != *dst_size) {
+        bgen_error("zstd genotype length mismatch");
         return 1;
     }
 

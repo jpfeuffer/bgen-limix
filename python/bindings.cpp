@@ -118,9 +118,11 @@ public:
 
     std::string filepath() const { return filepath_; }
 
-    int32_t nvariants() const { return bgen_file_nvariants(handle_.ptr); }
+    uint32_t nvariants() const { return bgen_file_nvariants(handle_.ptr); }
 
-    int32_t nsamples() const { return bgen_file_nsamples(handle_.ptr); }
+    uint32_t nsamples() const { return bgen_file_nsamples(handle_.ptr); }
+
+    unsigned layout() const { return bgen_file_layout(handle_.ptr); }
 
     bool contain_samples() const { return bgen_file_contain_samples(handle_.ptr); }
 
@@ -129,11 +131,11 @@ public:
         if (!samples)
             throw std::runtime_error("Could not read samples from BGEN file.");
 
-        int32_t n = nsamples();
+        uint32_t n = nsamples();
         std::vector<std::string> result;
         result.reserve(static_cast<size_t>(n));
 
-        for (int32_t i = 0; i < n; ++i) {
+        for (uint32_t i = 0; i < n; ++i) {
             const struct bgen_string* s = bgen_samples_get(samples, static_cast<uint32_t>(i));
             result.emplace_back(bgen_string_data(s), bgen_string_length(s));
         }
@@ -143,7 +145,7 @@ public:
     }
 
     void create_metafile(const std::string& filepath, bool verbose = false) {
-        int32_t nv = nvariants();
+        uint32_t nv = nvariants();
         // Estimate partition count using the same formula as cbgen:
         //   m = max(min(128, nvariants), floor(sqrt(nvariants)))
         //   nparts = nvariants / m  (at least 1)
@@ -167,7 +169,7 @@ public:
         if (!gt)
             throw std::runtime_error("Could not open genotype at offset.");
 
-        int32_t ns = nsamples();
+        uint32_t ns = nsamples();
         unsigned ncombs = bgen_genotype_ncombs(gt);
 
         // Allocate directly in numpy's memory — no intermediate new[] or capsule.
@@ -186,7 +188,7 @@ public:
 
         bool phased = bgen_genotype_phased(gt);
 
-        for (int32_t i = 0; i < ns; ++i) {
+        for (uint32_t i = 0; i < ns; ++i) {
             ploidy_data[i] = bgen_genotype_ploidy(gt, static_cast<uint32_t>(i));
             missing_data[i] = bgen_genotype_missing(gt, static_cast<uint32_t>(i));
         }
@@ -206,7 +208,7 @@ public:
         if (!gt)
             throw std::runtime_error("Could not open genotype at offset.");
 
-        int32_t ns = nsamples();
+        uint32_t ns = nsamples();
         unsigned ncombs = bgen_genotype_ncombs(gt);
 
         // Allocate directly in numpy's memory.
@@ -225,7 +227,7 @@ public:
 
         bool phased = bgen_genotype_phased(gt);
 
-        for (int32_t i = 0; i < ns; ++i) {
+        for (uint32_t i = 0; i < ns; ++i) {
             ploidy_data[i] = bgen_genotype_ploidy(gt, static_cast<uint32_t>(i));
             missing_data[i] = bgen_genotype_missing(gt, static_cast<uint32_t>(i));
         }
@@ -439,6 +441,7 @@ NB_MODULE(_core, m) {
         .def_prop_ro("filepath", &BgenFile::filepath)
         .def_prop_ro("nvariants", &BgenFile::nvariants)
         .def_prop_ro("nsamples", &BgenFile::nsamples)
+        .def_prop_ro("layout", &BgenFile::layout)
         .def_prop_ro("contain_samples", &BgenFile::contain_samples)
         .def("read_samples", &BgenFile::read_samples)
         .def("create_metafile", &BgenFile::create_metafile,

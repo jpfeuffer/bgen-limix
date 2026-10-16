@@ -53,6 +53,11 @@ class bgen_file:
         return self._impl.nsamples
 
     @property
+    def layout(self) -> int:
+        """BGEN layout version (1 or 2), from the native parsed header."""
+        return self._impl.layout
+
+    @property
     def contain_samples(self) -> bool:
         """Check if file contains samples."""
         return self._impl.contain_samples

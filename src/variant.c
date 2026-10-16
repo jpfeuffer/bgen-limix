@@ -45,10 +45,24 @@ struct bgen_variant* bgen_variant_next(struct bgen_file* bgen_file, int* error)
     struct bgen_variant* v = bgen_variant_create();
 
     if (bgen_file_layout(bgen_file) == 1) {
-        if (stream_handle_seek(bgen_file_stream(bgen_file), 4, SEEK_CUR))
+        uint32_t nsamples = 0;
+        int64_t nread = stream_handle_read(bgen_file_stream(bgen_file), &nsamples,
+                                          sizeof(nsamples));
+        if (nread == 0 && stream_handle_eof(bgen_file_stream(bgen_file))) {
+            bgen_variant_destroy(v);
+            return NULL;
+        }
+        if (nread != (int64_t)sizeof(nsamples)) {
+            bgen_perror_eof(stream_handle_eof(bgen_file_stream(bgen_file)),
+                           "could not read layout 1 variant sample count");
             goto err;
+        }
+        if (nsamples != bgen_file_nsamples(bgen_file)) {
+            bgen_error("layout 1 variant sample count mismatch");
+            goto err;
+        }
     }
-    if (bgen_file_layout(bgen_file) != 2) {
+    else if (bgen_file_layout(bgen_file) != 2) {
         bgen_error("unknown layout %d", bgen_file_layout(bgen_file));
         goto err;
     }
@@ -102,14 +116,23 @@ struct bgen_variant* bgen_variant_next(struct bgen_file* bgen_file, int* error)
     }
     v->genotype_offset = (uint64_t)offset;
 
-    uint32_t length = 0;
-    if (bgen_stream_fread(bgen_file_stream(bgen_file), &length, sizeof(length)) != 1) {
-        bgen_perror_eof(stream_handle_eof(bgen_file_stream(bgen_file)), "could not read length to skip");
-        goto err;
+    uint64_t length = (uint64_t)bgen_file_nsamples(bgen_file) * 6;
+    if (bgen_file_layout(bgen_file) == 2 || bgen_file_compression(bgen_file) != 0) {
+        uint32_t encoded_length = 0;
+        if (bgen_stream_fread(bgen_file_stream(bgen_file), &encoded_length, sizeof(encoded_length)) != 1) {
+            bgen_perror_eof(stream_handle_eof(bgen_file_stream(bgen_file)), "could not read length to skip");
+            goto err;
+        }
+        length = encoded_length;
     }
 
-    if (stream_handle_seek(bgen_file_stream(bgen_file), length, SEEK_CUR)) {
+    if (length && stream_handle_seek(bgen_file_stream(bgen_file), (int64_t)(length - 1), SEEK_CUR)) {
         bgen_perror("could not jump to the next variant");
+        goto err;
+    }
+    char last;
+    if (length && bgen_stream_fread(bgen_file_stream(bgen_file), &last, 1) != 1) {
+        bgen_perror_eof(stream_handle_eof(bgen_file_stream(bgen_file)), "truncated genotype block");
         goto err;
     }
 

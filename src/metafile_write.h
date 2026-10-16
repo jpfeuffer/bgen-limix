@@ -115,10 +115,10 @@ static uint64_t write_metafile_metadata_block(FILE* stream, uint64_t* poffset,
     uint64_t curr_offset = (uint64_t)ftold;
 
     uint32_t part_size = bgen_metafile_partition_size(nvariants, npartitions);
-    for (struct bgen_variant* variant = bgen_variant_begin(bgen, &error);
-         variant != bgen_variant_end(bgen); variant = bgen_variant_next(bgen, &error)) {
-
-        if (error) {
+    for (uint32_t index = 0; index < nvariants; ++index) {
+        struct bgen_variant* variant = index == 0 ? bgen_variant_begin(bgen, &error) :
+                                                   bgen_variant_next(bgen, &error);
+        if (error || !variant) {
             bgen_error("could not write every variant");
             goto err;
         }
@@ -128,8 +128,10 @@ static uint64_t write_metafile_metadata_block(FILE* stream, uint64_t* poffset,
 
         uint64_t size = write_variant(stream, variant);
 
-        if (size == 0)
+        if (size == 0) {
+            bgen_variant_destroy(variant);
             goto err;
+        }
 
         if (verbose)
             bgen_progress_update(&progress, 1);

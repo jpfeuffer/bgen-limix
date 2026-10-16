@@ -66,6 +66,21 @@ with BgenFile("example.bgen") as bgen:
             print(f"{variant.rsid}: {gt.probability.shape}")
 ```
 
+`bgen.layout` reports the native header's layout version (`1` or `2`), also
+available on the legacy `bgen_file` API. Sample and variant counts are unsigned
+32-bit values exposed as Python integers. Unsupported header flags and truncated
+headers are rejected by the native reader.
+
+Layout 1 supports raw and zlib-compressed, biallelic, diploid, unphased records,
+including metafile indexing. Its three independently rounded probabilities are
+decoded as `q / 32768` without renormalization; all-zero triplets are marked
+missing and returned as NaNs. Layout 2 supports raw, zlib and zstd blocks with
+1--32-bit probabilities, variable ploidy, and multiple alleles. Phased records
+whose samples all have zero ploidy return shape `(nsamples, 0)`, retaining
+their ploidy and missingness arrays. Both layouts support `precision=32` and
+`precision=64`; returned Python arrays remain valid after subsequent reads and
+after closing the file.
+
 ## C API
 
 Link against the `bgen` library:
