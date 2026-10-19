@@ -12,6 +12,7 @@ struct bgen_file;
 char const*      bgen_file_filepath(struct bgen_file const* bgen_file);
 
 int              bgen_file_seek_variants_start(struct bgen_file* bgen_file);
+int              bgen_file_seek_genotype(struct bgen_file* file, uint64_t offset);
 
 /**
  * fread-compatible helper over stream_handle: behaves like

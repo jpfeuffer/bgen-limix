@@ -10,6 +10,7 @@ __all__ = [
     "Genotype",
     "GenotypeBatchMetadata",
     "GenotypeBatchResult",
+    "GenotypeDimensions",
     "GenotypeResult",
     "Partition",
     "Variants",
@@ -41,6 +42,22 @@ class GenotypeResult:
 
 # Legacy alias for API compatibility with the old cbgen package.
 Genotype = GenotypeResult
+
+
+@dataclass(frozen=True)
+class GenotypeDimensions:
+    """Probability capacities, with no per-sample metadata arrays.
+
+    gp_width/hp_width are maxima under the selected model assumption.
+    Zero means that model is absent; hp_width is at least one if selected,
+    even for zero-ploidy phased records. decode_width is their maximum.
+    Empty selections have all widths zero. These dimensions do not certify
+    probability payload integrity or explicit model assumptions.
+    """
+
+    gp_width: int
+    hp_width: int
+    decode_width: int
 
 
 @dataclass
@@ -76,6 +93,8 @@ class GenotypeBatchResult(GenotypeBatchMetadata):
     are also NaN: use missing/probability_count to distinguish missingness and
     structural padding. Phased rows flatten haplotype-major allele
     probabilities, just like GenotypeResult.
+    In compact-capacity mode, ncombs is the maximum actual sample width,
+    not the declared maximum-ploidy width (zero for zero samples).
     """
 
     probability: npt.NDArray[np.float64] | npt.NDArray[np.float32]

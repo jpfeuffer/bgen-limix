@@ -41,7 +41,8 @@ static inline void set_array_nan32(float* p, size_t n)
         p[i] = NAN;
 }
 
-int bgen_layout2_read_header(struct bgen_file* bgen_file, struct bgen_genotype* genotype)
+static int read_header(struct bgen_file* bgen_file, struct bgen_genotype* genotype,
+                       bool compact)
 {
     uint32_t nsamples = 0;
 
@@ -118,10 +119,28 @@ int bgen_layout2_read_header(struct bgen_file* bgen_file, struct bgen_genotype* 
         goto err;
     }
 
+    if (compact && (min_ploidy != max_ploidy || !nsamples)) {
+        unsigned actual_min = 63, actual_max = 0;
+        for (uint32_t i = 0; i < nsamples; ++i) {
+            unsigned p = read_ploidy(encoded_ploidy[i]);
+            if (p < min_ploidy || p > max_ploidy) {
+                bgen_error("sample ploidy outside genotype range");
+                goto err;
+            }
+            if (p < actual_min) actual_min = p;
+            if (p > actual_max) actual_max = p;
+        }
+        min_ploidy = (uint8_t)(nsamples ? actual_min : 0);
+        max_ploidy = (uint8_t)actual_max;
+        genotype->min_ploidy = min_ploidy;
+        genotype->max_ploidy = max_ploidy;
+    }
     if (phased)
         genotype->ncombs = (unsigned)nalleles * (unsigned)genotype->max_ploidy;
     else if (bgen_checked_ncombs(max_ploidy, nalleles, &genotype->ncombs))
         goto err;
+    if (compact && !nsamples)
+        genotype->ncombs = 0;
 
     uint64_t probability_bits = 0;
     size_t payload_size = size - (size_t)(chunk_ptr - chunk);
@@ -138,7 +157,8 @@ int bgen_layout2_read_header(struct bgen_file* bgen_file, struct bgen_genotype* 
             goto err;
         }
         uint64_t bits_per_sample = (uint64_t)nbits * (phased ?
-            (unsigned)max_ploidy * (unsigned)(nalleles - 1) : genotype->ncombs - 1);
+            (unsigned)max_ploidy * (unsigned)(nalleles - 1) :
+            (genotype->ncombs ? genotype->ncombs - 1 : 0));
         if (bits_per_sample && nsamples > (uint64_t)payload_size * 8 / bits_per_sample) {
             bgen_error("layout 2 probability data is truncated");
             goto err;
@@ -186,6 +206,16 @@ err:
     genotype->chunk              = NULL;
     genotype->ploidy_missingness = NULL;
     return 1;
+}
+
+int bgen_layout2_read_header(struct bgen_file* file, struct bgen_genotype* genotype)
+{
+    return read_header(file, genotype, false);
+}
+
+int bgen_layout2_read_header_compact(struct bgen_file* file, struct bgen_genotype* genotype)
+{
+    return read_header(file, genotype, true);
 }
 
 void bgen_layout2_read_genotype64(struct bgen_genotype* genotype, double* probs)

@@ -15,6 +15,7 @@ from cbgen.typing import (
     Genotype,
     GenotypeBatchMetadata,
     GenotypeBatchResult,
+    GenotypeDimensions,
     GenotypeResult,
     Partition,
     Variants,
@@ -27,6 +28,7 @@ __all__ = [
     "Genotype",
     "GenotypeBatchMetadata",
     "GenotypeBatchResult",
+    "GenotypeDimensions",
     "GenotypeResult",
     "Partition",
     "PartitionResult",
@@ -172,11 +174,58 @@ class BgenFile:
         """
         return GenotypeBatchMetadata(**self._impl.read_genotype_metadata(offsets))
 
+    def read_dimensions(
+        self,
+        offsets: list[int],
+        *,
+        ploidy_source: str = "actual",
+        probability_model: str = "auto",
+        max_ploidy: int | None = None,
+    ) -> GenotypeDimensions:
+        """Discover GP/HP/decode maxima without probability arrays.
+
+        ``actual`` scans sample ploidy; ``declared`` uses header max ploidy.
+        ``auto`` reads original phase; ``unphased``/``phased`` assume a model,
+        and ``mixed`` reserves both widths for every record. Assumptions are
+        not validated here and must be checked during full decode.
+
+        Layout 1 uses fixed K=2/P=2 without genotype payload reads (explicit
+        phased reserves HP=4; mixed GP=3/HP=4). Raw/zlib layout 2 read needed
+        prefixes: declared+explicit model needs eight uncompressed bytes;
+        auto must reach phase after sample ploidies. Zstd loads a full block.
+        Prefixes do not validate skipped metadata, trailing data/checksums or
+        numerical probabilities. Full reads validate framing/payload integrity;
+        consumers must validate numerical probabilities separately.
+        hp_width>=1 retains phase presence when all selected ploidies are zero.
+        Empty selections return all zeros. Width overflow raises an error.
+
+        max_ploidy in [0,63] overrides the capacity calculation, not sample
+        validation. This avoids unused declared-width overflow and, on raw/
+        zlib, skips scanning sample ploidy even with source='actual'. AUTO
+        still reaches phase; explicit models need only eight header bytes.
+        Validate this assumed bound against ploidy during later full decode.
+        """
+        if ploidy_source not in ("actual", "declared"):
+            raise ValueError("ploidy_source must be 'actual' or 'declared'.")
+        models = {"auto": 0, "unphased": 1, "phased": 2, "mixed": 3}
+        if probability_model not in models:
+            raise ValueError("Invalid probability_model.")
+        if max_ploidy is not None and not 0 <= max_ploidy <= 63:
+            raise ValueError("max_ploidy must be in [0, 63].")
+        return GenotypeDimensions(
+            **self._impl.read_dimensions(
+                offsets, ploidy_source == "actual", models[probability_model],
+                -1 if max_ploidy is None else max_ploidy,
+            )
+        )
+
     def read_genotypes_batch(
         self,
         offsets: list[int],
         max_ncomb: int | None = None,
         precision: int = 64,
+        *,
+        max_actual_ncomb: int | None = None,
     ) -> GenotypeBatchResult:
         """Decode a native structured batch across all supported encodings.
 
@@ -197,14 +246,30 @@ class BgenFile:
         metadata bytes. Native scratch holds at most one genotype block and
         one variant's decoded probabilities; no second full batch is built.
         Request float64 when deriving dosage before a later float32 cast.
+
+        Alternatively, ``max_actual_ncomb`` is a compact capacity bounding
+        actual structural sample widths, including missing samples. It is
+        mutually exclusive with max_ncomb and never pre-scans. Full records
+        validate before each variant's output is written; bounds are checked,
+        not used to truncate. Declared width may exceed capacity. No declared-
+        width probability scratch is allocated, and ncombs reports effective
+        actual widths (zero for zero samples) in this mode. Earlier variants
+        may have been decoded when a later variant raises an exception; no
+        partial batch is returned. Default behavior is unchanged.
         """
         if precision not in (64, 32):
             raise ValueError("Precision must be either 64 or 32.")
         if max_ncomb is not None and not 0 <= max_ncomb <= 2**32 - 1:
             raise ValueError("max_ncomb must be an unsigned 32-bit width.")
+        if max_actual_ncomb is not None:
+            if max_ncomb is not None:
+                raise ValueError("max_ncomb and max_actual_ncomb are mutually exclusive.")
+            if not 0 <= max_actual_ncomb <= 2**32 - 1:
+                raise ValueError("max_actual_ncomb must be an unsigned 32-bit width.")
         return GenotypeBatchResult(
             **self._impl.read_genotypes_batch_result(
-                offsets, -1 if max_ncomb is None else max_ncomb, precision
+                offsets, -1 if max_ncomb is None else max_ncomb, precision,
+                -1 if max_actual_ncomb is None else max_actual_ncomb,
             )
         )
 

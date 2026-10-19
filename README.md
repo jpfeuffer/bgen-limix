@@ -149,6 +149,73 @@ sample slicing is not supported. File handles are not thread-safe.
 Legacy `bgen_file.read_genotypes_batch` remains probability-only float64 and
 does not allocate the new metadata arrays.
 
+### Lightweight dimensions and compact capacity (unreleased)
+
+```python
+with BgenFile("example.bgen") as bgen:
+    dimensions = bgen.read_dimensions(
+        offsets, ploidy_source="actual", probability_model="auto"
+    )
+    batch = bgen.read_genotypes_batch(
+        offsets, max_actual_ncomb=dimensions.decode_width, precision=64
+    )
+    # All output fields can reuse this one batch.
+```
+
+`GenotypeDimensions` contains Python integer maxima `gp_width`, `hp_width` and
+`decode_width = max(gp_width, hp_width)`; native counts must fit uint32.
+It does not return per-sample arrays. GP width zero means no unphased model
+was selected; HP width zero means no phased model was selected. **HP width is
+at least one if phased is selected**, even if all haplotypes have ploidy zero.
+This preserves model presence for output schema creation; actual decoded phased
+rows may still have zero probability entries. Empty selections return all zeros.
+
+| Discovery strategy | Raw layout 2 | Zlib layout 2 | Zstd layout 2 |
+| --- | --- | --- | --- |
+| Actual + auto | Read header, sample ploidies and phase | Inflate prefix and scan ploidies | Load full validated block and scan ploidies |
+| Declared + auto | Read header, seek over ploidies, read phase | Inflate/discard ploidies to reach phase | Load full validated block |
+| Declared + explicit model | Read first eight bytes | Inflate first eight bytes | Load full validated block |
+
+`ploidy_source="actual"` bounds dimensions using all sample ploidies, including
+missing samples. `"declared"` uses the encoded maximum ploidy and may reserve
+more space than any sample needs. `probability_model="auto"` reads original
+phase. `"unphased"` or `"phased"` assumes that model, without validating it
+during prefix discovery; `"mixed"` reserves both GP and HP bounds for every
+record. The phase byte occurs **after** the sample-ploidy bytes, so it is not
+available from the first eight bytes. Layout 1 always has intrinsic K=2/P=2,
+so no genotype payload is needed; explicit phased/mixed assumptions still
+reserve HP=4 (mixed also GP=3), and the full reader reports original unphasedness.
+
+Optional `max_ploidy=bound` (0--63) substitutes a caller-provided capacity
+assumption instead of either source of ploidy. Raw/zlib then skip scanning
+sample ploidies: auto still reads phase, while explicit models only need the
+header. This avoids overflow from an unused, loose declared maximum. The bound
+is **not validated against samples in discovery**; consumers must check decoded
+ploidy and model against their assumptions. With known allele counts, a supplied
+ploidy bound and explicit model, consumers can calculate capacity and call
+compact batch directly without invoking discovery at all.
+
+Discovery is **not an integrity-validation pass**. Raw/zlib prefix strategies
+may accept a truncated tail, skipped invalid ploidies/phase or a missing checksum
+that full reads reject. Zstd deliberately uses
+the full-block native header path; actual/override strategies validate compact
+actual counts, while declared discovery validates declared counts too.
+Layout-1 fixed dimensions do not validate payloads or authenticate index offsets.
+Numerical probability sums are not validated by discovery or native decoding;
+consumers requiring numerical validation must check decoded probabilities.
+
+`max_actual_ncomb=W` is mutually exclusive with `max_ncomb`. It reads each block
+once, validates the full native header/payload lengths and bounds **actual**
+structural sample widths before writing that variant. Missing samples count
+towards capacity. Too-small capacity raises, never truncates. Even overflowing
+unused declared combination counts do not force a huge intermediate allocation.
+In this mode only, `batch.ncombs[v]` is the effective maximum actual sample width,
+not the declared maximum-ploidy width; it is zero for zero-sample variants.
+Probabilities, precision, metadata ownership, ordering, duplicate offsets and
+NaN padding otherwise retain their usual semantics. There is no width pre-scan
+and no declared-width probability scratch; output and optional one-variant
+decoded scratch are bounded by W. All default APIs keep their original behavior.
+
 ### Performance checks
 
 `scripts/benchmark_decode.py` compares two Release shared-library builds through

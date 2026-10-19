@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Public `BgenFile.read_dimensions(offsets, *, ploidy_source="actual",
+  probability_model="auto", max_ploidy=None)` returning simple GP, HP and decode
+  capacity maxima. Actual-ploidy and declared-header strategies use native raw/
+  zlib prefix reads and validated full zstd blocks; layout 1 has fixed intrinsic
+  dimensions without genotype payload access. Explicit model/ploidy assumptions
+  avoid unnecessary discovery and must be checked during full decoding.
+- Optional `max_actual_ncomb` on modern batch reads for a single-pass compact
+  capacity, with no width pre-scan and no declared-width probability scratch.
+  Validate actual sample widths, including missing samples, before writing each
+  variant; report effective actual row widths in batch `ncombs`.
+
+### Fixed
+
+- Allow compact reads with loose declared maximum ploidy even when unused
+  declared genotype counts overflow: compute and validate actual ploidy ranges
+  before combination counts. Default single/batch decoding remains unchanged.
+
 ## 4.13.0 - 2026-10-19
 
 ### Added

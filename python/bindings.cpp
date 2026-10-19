@@ -306,12 +306,34 @@ public:
     }
 
     nb::dict read_genotypes_batch_result(const std::vector<uint64_t>& offsets,
-                                         int64_t max_ncomb = -1, int precision = 64) {
+                                         int64_t max_ncomb = -1, int precision = 64,
+                                         int64_t max_actual_ncomb = -1) {
+        if (max_actual_ncomb < -1 || max_actual_ncomb > UINT32_MAX ||
+            (max_actual_ncomb != -1 && max_ncomb != -1))
+            throw nb::value_error("Specify only one valid max_ncomb or max_actual_ncomb.");
         uint32_t n = batch_size(offsets);
         uint32_t ns = nsamples();
         struct bgen_batch_metadata metadata{};
         auto result = metadata_arrays(n, ns, metadata);
-        result["probability"] = read_batch_probabilities(offsets, max_ncomb, precision, &metadata);
+        result["probability"] = read_batch_probabilities(
+            offsets, max_actual_ncomb == -1 ? max_ncomb : max_actual_ncomb,
+            precision, &metadata, max_actual_ncomb != -1);
+        return result;
+    }
+
+    nb::dict read_dimensions(const std::vector<uint64_t>& offsets, bool actual,
+                              int model, int max_ploidy = -1) {
+        if (model < BGEN_MODEL_AUTO || model > BGEN_MODEL_MIXED)
+            throw nb::value_error("Invalid probability model.");
+        struct bgen_dimensions dimensions{};
+        if (bgen_file_read_dimensions_with_ploidy(file(), offsets.data(), batch_size(offsets),
+                                      actual, static_cast<bgen_probability_model>(model),
+                                      max_ploidy, &dimensions))
+            throw std::runtime_error("Could not read genotype dimensions.");
+        nb::dict result;
+        result["gp_width"] = dimensions.gp_width;
+        result["hp_width"] = dimensions.hp_width;
+        result["decode_width"] = dimensions.decode_width;
         return result;
     }
 
@@ -323,7 +345,8 @@ public:
 private:
     nb::object read_batch_probabilities(const std::vector<uint64_t>& offsets,
                                         int64_t max_ncomb, int precision,
-                                        struct bgen_batch_metadata* metadata) {
+                                        struct bgen_batch_metadata* metadata,
+                                        bool compact = false) {
         uint32_t n = batch_size(offsets);
         uint32_t ns = nsamples();
         if (precision != 32 && precision != 64)
@@ -341,11 +364,16 @@ private:
         auto probabilities = make_batch_array(
             {n, ns, width}, precision == 32 ? NPY_FLOAT : NPY_DOUBLE,
             precision == 32 ? sizeof(float) : sizeof(double), &out);
-        int error = precision == 32 ?
-            bgen_file_read_genotypes_batch32(file(), offsets.data(), n, width,
-                                             static_cast<float*>(out), metadata) :
-            bgen_file_read_genotypes_batch64(file(), offsets.data(), n, width,
-                                             static_cast<double*>(out), metadata);
+        int error;
+        if (precision == 32) {
+            auto decode = compact ? bgen_file_read_genotypes_batch_compact32 :
+                                    bgen_file_read_genotypes_batch32;
+            error = decode(file(), offsets.data(), n, width, static_cast<float*>(out), metadata);
+        } else {
+            auto decode = compact ? bgen_file_read_genotypes_batch_compact64 :
+                                    bgen_file_read_genotypes_batch64;
+            error = decode(file(), offsets.data(), n, width, static_cast<double*>(out), metadata);
+        }
         if (error)
             throw std::runtime_error("Could not read genotype batch (invalid offset or max_ncomb).");
         return probabilities;
@@ -513,8 +541,11 @@ NB_MODULE(_core, m) {
         .def("get_ncombs", &BgenFile::get_ncombs, "offsets"_a,
              "Return a uint32 array of ncombs values for each offset (header-only scan).")
         .def("read_genotype_metadata", &BgenFile::read_genotype_metadata, "offsets"_a)
+        .def("read_dimensions", &BgenFile::read_dimensions,
+             "offsets"_a, "actual"_a, "model"_a, "max_ploidy"_a = -1)
         .def("read_genotypes_batch_result", &BgenFile::read_genotypes_batch_result,
-             "offsets"_a, "max_ncomb"_a = -1, "precision"_a = 64)
+             "offsets"_a, "max_ncomb"_a = -1, "precision"_a = 64,
+             "max_actual_ncomb"_a = -1)
         .def("read_genotypes_batch", &BgenFile::read_genotypes_batch,
              "offsets"_a, "max_ncomb"_a = -1,
              "Read probabilities for multiple variants into a padded rectangular array. "

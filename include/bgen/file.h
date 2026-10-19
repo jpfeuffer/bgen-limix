@@ -188,4 +188,72 @@ BGEN_EXPORT int bgen_file_read_genotypes_batch32(
     struct bgen_file* file, uint64_t const* offsets, uint32_t n_offsets,
     uint32_t max_ncombs, float* out, struct bgen_batch_metadata* metadata);
 
+/** Probability-model assumption for lightweight dimension discovery.
+ * AUTO reads phase; other modes are assumptions, not phase validation.
+ * MIXED reserves both GP and HP widths for every selected variant.
+ */
+enum bgen_probability_model {
+    BGEN_MODEL_AUTO = 0,
+    BGEN_MODEL_UNPHASED = 1,
+    BGEN_MODEL_PHASED = 2,
+    BGEN_MODEL_MIXED = 3
+};
+
+/** Maxima for discovery, without per-sample output allocation.
+ * gp_width is zero if no unphased model is selected. hp_width is at least
+ * one when phased is selected, even at zero ploidy, to retain phase presence.
+ * decode_width = max(gp_width, hp_width). Empty requests return all zeros.
+ */
+struct bgen_dimensions {
+    uint32_t gp_width;
+    uint32_t hp_width;
+    uint32_t decode_width;
+};
+
+/** Discover dimensions using actual sample ploidy or declared max ploidy.
+ * actual_ploidy=true scans sample ploidies; false uses the declared header.
+ * Layout 1 uses fixed diploid/biallelic dimensions without payload access.
+ * Raw/zlib layout 2 read only necessary prefixes; declared+explicit model
+ * need only the first eight uncompressed bytes. AUTO must also reach phase
+ * after the sample-ploidy bytes. Zstd uses full validated block loading.
+ * Explicit models also apply to layout 1 (PHASED reserves width 4, MIXED both).
+ * This is NOT full integrity validation: skipped data/phase assumptions must
+ * be validated during later full reads. In particular, trailing truncation
+ * may go undetected by prefix strategies. Width overflow is an error.
+ * Outputs are written only on success. Caller owns output; no arrays returned.
+ * File-handle thread-safety rules match the batch APIs.
+ */
+BGEN_EXPORT int bgen_file_read_dimensions(
+    struct bgen_file* file, uint64_t const* offsets, uint32_t n_offsets,
+    bool actual_ploidy, enum bgen_probability_model model,
+    struct bgen_dimensions* out);
+
+/** Dimension discovery with a caller's ploidy capacity assumption.
+ * max_ploidy in [0,63] overrides the ploidy used to calculate capacities,
+ * without validating sample ploidies against it. Pass -1 for no override.
+ * Raw/zlib AUTO reads phase but need not scan sample ploidy; explicit models
+ * need only the header. Zstd still loads/validates a full compact block.
+ * Later full decode must validate any user-supplied ploidy bound.
+ */
+BGEN_EXPORT int bgen_file_read_dimensions_with_ploidy(
+    struct bgen_file* file, uint64_t const* offsets, uint32_t n_offsets,
+    bool actual_ploidy, enum bgen_probability_model model, int max_ploidy,
+    struct bgen_dimensions* out);
+
+/** Single-pass compact-capacity batch, without a width pre-scan.
+ * Capacity bounds actual sample structural widths, not declared max ploidy.
+ * Full headers/payload lengths are validated before each variant is written.
+ * Missing samples count towards bounds. Effective ncombs in metadata is the
+ * actual maximum sample width (zero at zero samples), unlike default batches.
+ * No declared-width probability buffer is allocated. Earlier variants may be
+ * filled on error; a failing variant is not written. Capacity is never a
+ * truncation limit. All other semantics match batch64/32.
+ */
+BGEN_EXPORT int bgen_file_read_genotypes_batch_compact64(
+    struct bgen_file* file, uint64_t const* offsets, uint32_t n_offsets,
+    uint32_t capacity, double* out, struct bgen_batch_metadata* metadata);
+BGEN_EXPORT int bgen_file_read_genotypes_batch_compact32(
+    struct bgen_file* file, uint64_t const* offsets, uint32_t n_offsets,
+    uint32_t capacity, float* out, struct bgen_batch_metadata* metadata);
+
 #endif

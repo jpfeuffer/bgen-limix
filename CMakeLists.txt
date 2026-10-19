@@ -148,6 +148,7 @@ endif()
 # --- bgen C library ---
 set(_bgen_sources
   src/file.c
+  src/dimensions.c
   src/genotype.c
   src/io.c
   src/layout1.c

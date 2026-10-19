@@ -161,28 +161,35 @@ err:
     return NULL;
 }
 
-static int open_genotype(struct bgen_file* bgen, uint64_t genotype_offset,
-                         struct bgen_genotype* genotype)
+int bgen_file_seek_genotype(struct bgen_file* bgen, uint64_t genotype_offset)
 {
-    genotype->layout = bgen->layout;
-    genotype->offset = genotype_offset;
-
     if (genotype_offset > INT64_MAX || genotype_offset < (uint64_t)bgen->variants_start) {
         bgen_error("invalid genotype offset");
-        goto err;
+        return 1;
     }
 
     if (stream_handle_tell(bgen->stream) != (int64_t)genotype_offset &&
         stream_handle_seek(bgen_file_stream(bgen), (int64_t)genotype_offset, SEEK_SET)) {
         bgen_perror("could not fseek a variant");
-        goto err;
+        return 1;
     }
+    return 0;
+}
+
+static int open_genotype(struct bgen_file* bgen, uint64_t genotype_offset,
+                         struct bgen_genotype* genotype, bool compact)
+{
+    genotype->layout = bgen->layout;
+    genotype->offset = genotype_offset;
+    if (bgen_file_seek_genotype(bgen, genotype_offset))
+        goto err;
 
     if (bgen_file_layout(bgen) == 1) {
         if (bgen_layout1_read_header(bgen, genotype))
             goto err;
     } else if (bgen_file_layout(bgen) == 2) {
-        if (bgen_layout2_read_header(bgen, genotype))
+        if (compact ? bgen_layout2_read_header_compact(bgen, genotype) :
+                      bgen_layout2_read_header(bgen, genotype))
             goto err;
     } else {
         bgen_error("unrecognized layout type %d", bgen_file_layout(bgen));
@@ -205,7 +212,7 @@ struct bgen_genotype* bgen_file_open_genotype(struct bgen_file* bgen, uint64_t g
         bgen_error("could not allocate genotype");
         return NULL;
     }
-    if (!open_genotype(bgen, genotype_offset, genotype))
+    if (!open_genotype(bgen, genotype_offset, genotype, false))
         return genotype;
     bgen_genotype_close(genotype);
     return NULL;
@@ -348,7 +355,7 @@ static int copy_metadata(struct bgen_genotype const* gt, uint32_t index,
 }
 
 static int read_batch(struct bgen_file* f, uint64_t const* offsets, uint32_t n_offsets,
-                      uint32_t width, void* out, unsigned precision, bool exact,
+                      uint32_t width, void* out, unsigned precision, bool exact, bool compact,
                       struct bgen_batch_metadata* metadata)
 {
     if (!f || (n_offsets && !offsets)) {
@@ -370,14 +377,16 @@ static int read_batch(struct bgen_file* f, uint64_t const* offsets, uint32_t n_o
     for (uint32_t i = 0; i < n_offsets; ++i) {
         struct bgen_genotype gt;
         bgen_genotype_init(&gt);
-        if (open_genotype(f, offsets[i], &gt))
+        if (open_genotype(f, offsets[i], &gt, compact))
             goto err;
+        if (compact && !gt.nsamples)
+            gt.ncombs = 0;
         if (precision && (gt.ncombs > width || (exact && gt.ncombs != width))) {
             bgen_error("batch max_ncomb=%u does not accommodate ncombs=%u at offset %" PRIu64,
                        width, gt.ncombs, offsets[i]);
             goto err;
         }
-        if (copy_metadata(&gt, i, metadata))
+        if (!compact && copy_metadata(&gt, i, metadata))
             goto err;
         if (precision && f->nsamples && width) {
             size_t slice_start = (size_t)i * f->nsamples * width;
@@ -406,9 +415,10 @@ static int read_batch(struct bgen_file* f, uint64_t const* offsets, uint32_t n_o
             if (error)
                 goto err;
             if (gt.ncombs != width) {
-                if (!padding_filled) {
+                if (compact || !padding_filled) {
                     /* Fill the untouched suffix once, keeping padding vectorizable. */
-                    size_t elements = (size_t)(n_offsets - i) * f->nsamples * width;
+                    size_t elements = (size_t)(compact ? 1 : n_offsets - i) *
+                        f->nsamples * width;
                     if (precision == 32) {
                         for (size_t c = 0; c < elements; ++c)
                             ((float*)slice)[c] = NAN;
@@ -426,6 +436,8 @@ static int read_batch(struct bgen_file* f, uint64_t const* offsets, uint32_t n_o
                 }
             }
         }
+        if (compact && copy_metadata(&gt, i, metadata))
+            goto err;
         bgen_genotype_release_buffers(&gt);
         continue;
 err:
@@ -439,26 +451,40 @@ int bgen_file_read_genotypes_batch64(struct bgen_file* f, uint64_t const* offset
                                      uint32_t n_offsets, uint32_t width, double* out,
                                      struct bgen_batch_metadata* metadata)
 {
-    return read_batch(f, offsets, n_offsets, width, out, 64, false, metadata);
+    return read_batch(f, offsets, n_offsets, width, out, 64, false, false, metadata);
 }
 
 int bgen_file_read_genotypes_batch32(struct bgen_file* f, uint64_t const* offsets,
                                      uint32_t n_offsets, uint32_t width, float* out,
                                      struct bgen_batch_metadata* metadata)
 {
-    return read_batch(f, offsets, n_offsets, width, out, 32, false, metadata);
+    return read_batch(f, offsets, n_offsets, width, out, 32, false, false, metadata);
 }
 
 int bgen_file_read_genotype_metadata(struct bgen_file* f, uint64_t const* offsets,
                                      uint32_t n_offsets, struct bgen_batch_metadata* metadata)
 {
-    return read_batch(f, offsets, n_offsets, 0, NULL, 0, false, metadata);
+    return read_batch(f, offsets, n_offsets, 0, NULL, 0, false, false, metadata);
 }
 
 int bgen_file_read_genotypes_batch(struct bgen_file* f, uint64_t const* offsets,
                                    uint32_t n_offsets, uint32_t ncombs, double* out)
 {
-    return read_batch(f, offsets, n_offsets, ncombs, out, 64, true, NULL);
+    return read_batch(f, offsets, n_offsets, ncombs, out, 64, true, false, NULL);
+}
+
+int bgen_file_read_genotypes_batch_compact64(struct bgen_file* f, uint64_t const* offsets,
+                                             uint32_t n_offsets, uint32_t width, double* out,
+                                             struct bgen_batch_metadata* metadata)
+{
+    return read_batch(f, offsets, n_offsets, width, out, 64, false, true, metadata);
+}
+
+int bgen_file_read_genotypes_batch_compact32(struct bgen_file* f, uint64_t const* offsets,
+                                             uint32_t n_offsets, uint32_t width, float* out,
+                                             struct bgen_batch_metadata* metadata)
+{
+    return read_batch(f, offsets, n_offsets, width, out, 32, false, true, metadata);
 }
 
 int bgen_file_read_ncombs_batch(struct bgen_file* f, uint64_t const* offsets,
