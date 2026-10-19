@@ -149,7 +149,7 @@ sample slicing is not supported. File handles are not thread-safe.
 Legacy `bgen_file.read_genotypes_batch` remains probability-only float64 and
 does not allocate the new metadata arrays.
 
-### Lightweight dimensions and compact capacity (unreleased)
+### Lightweight dimensions and compact capacity (4.14.0)
 
 ```python
 with BgenFile("example.bgen") as bgen:
