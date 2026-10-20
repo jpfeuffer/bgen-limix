@@ -36,6 +36,7 @@ else()
     OUTPUT_STRIP_TRAILING_WHITESPACE
     COMMAND_ERROR_IS_FATAL ANY)
 endif()
+file(TO_CMAKE_PATH "${_nanobind_license}" _nanobind_license)
 install(FILES "${_nanobind_license}" DESTINATION cbgen/licenses RENAME nanobind.txt)
 file(READ "${NB_DIR}/ext/robin_map/include/tsl/robin_map.h" _robin_header)
 string(FIND "${_robin_header}" "*/" _robin_license_end)
