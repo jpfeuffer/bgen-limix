@@ -36,6 +36,7 @@ extern "C"
 #endif
 
 #include "bgen/bstring.h"
+#include "bgen/encode.h"
 #include "bgen/file.h"
 #include "bgen/genotype.h"
 #include "bgen/metafile.h"

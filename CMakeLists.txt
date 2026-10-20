@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
 project(
   bgen
-  VERSION 4.14.0
+  VERSION 4.15.0
   LANGUAGES C CXX
   DESCRIPTION "C library and Python bindings for the BGEN format (specifications 1.2 and 1.3)")
 
@@ -147,6 +147,7 @@ endif()
 
 # --- bgen C library ---
 set(_bgen_sources
+  src/encode.cpp
   src/file.c
   src/dimensions.c
   src/genotype.c
@@ -167,9 +168,8 @@ set(_bgen_sources
 add_library(bgen ${_bgen_sources})
 add_library(BGEN::bgen ALIAS bgen)
 
-# stream.cpp is the only C++ translation unit here; the rest of the target is
-# C11. A per-target requirement (rather than a global CMAKE_CXX_STANDARD)
-# keeps this scoped to the code that actually needs it.
+# Streaming and encoding use C++17 internally; the public API remains C11.
+# Keep the language requirement scoped to targets that actually need it.
 target_compile_features(bgen PRIVATE cxx_std_17)
 
 # -std=c11 with extensions off hides isatty()/fileno() on glibc (they are
@@ -302,6 +302,21 @@ endif()
 
 # --- Install ---
 include(GNUInstallDirs)
+
+if(NOT BGEN_USE_SYSTEM_ZLIB_NG)
+  install(FILES "${zlib-ng_SOURCE_DIR}/LICENSE.md"
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/bgen" RENAME zlib-ng.txt)
+endif()
+if(NOT BGEN_USE_SYSTEM_ZSTD)
+  install(FILES "${zstd_SOURCE_DIR}/LICENSE"
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/bgen" RENAME zstd-BSD.txt)
+endif()
+if(BGEN_ENABLE_S3 AND NOT BGEN_USE_SYSTEM_CURL)
+  install(FILES "${curl_SOURCE_DIR}/COPYING"
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/bgen" RENAME curl.txt)
+  install(DIRECTORY "${curl_SOURCE_DIR}/LICENSES/"
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/bgen/curl")
+endif()
 
 set(_bgen_install_targets bgen bgen_s3)
 if(NOT BGEN_USE_SYSTEM_ZLIB_NG)

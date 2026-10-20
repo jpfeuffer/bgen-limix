@@ -23,6 +23,8 @@ extern "C" {
 namespace nb = nanobind;
 using namespace nb::literals;
 
+void register_encoding(nb::module_ &m);
+
 // Helper: steal a numpy array PyObject* into a nanobind object.
 // The array is allocated by numpy's own allocator (PyArray_EMPTY),
 // so no intermediate new[] and no capsule needed.
@@ -488,7 +490,8 @@ private:
 // --- Module definition ---
 
 NB_MODULE(_core, m) {
-    m.doc() = "C extension for reading BGEN files (nanobind bindings)";
+    register_encoding(m);
+    m.doc() = "Native BGEN reading and layout-2 encoding (nanobind bindings)";
     if (_import_array() < 0)
         throw std::runtime_error("Failed to initialize numpy C API");
 

@@ -1,5 +1,23 @@
 # Changelog
 
+## 4.15.0.dev0 - Unreleased
+
+### Added
+
+- Public C `bgen_layout2_size` / `bgen_layout2_encode` bounded batch encoders
+  and Python `encode_layout2` / `encode_layout2_hardcalls` returning raw
+  layout-2 payload bytes and uint64 variant offsets. No full file writer,
+  compression or VCZ-specific sentinel interpretation.
+- GP/HP float32/64, per-variant phase, explicit missingness, K=1..65535,
+  P=0..63, bit depths 1..32, stable largest-remainder quantization, checked
+  combinatorial/size arithmetic and variant/sample diagnostics.
+- Direct signed int8/16/32/64 hard-call encoding with mixed ploidy, trailing
+  -2 fill, -1 missingness, optional explicit ploidy/missing metadata and
+  unphased BGEN colex genotype states.
+- Strict contiguous NumPy buffer contracts, GIL-free native encoding,
+  independent byte oracles, native reader roundtrips and a Python 3.12
+  `wheel` pixi environment. Existing 4.14 reader APIs are preserved.
+
 ## 4.14.0 - 2026-10-19
 
 ### Added

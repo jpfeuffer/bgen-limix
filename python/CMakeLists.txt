@@ -6,7 +6,7 @@ project(cbgen LANGUAGES C CXX)
 # conda `libbgen` package). Otherwise fall back to building it from source from
 # the parent repository so that PyPI sdist / cibuildwheel produce a
 # self-contained wheel.
-find_package(bgen QUIET)
+find_package(bgen 4.15 QUIET)
 
 if(TARGET BGEN::bgen)
   message(STATUS "cbgen: using pre-built bgen (BGEN::bgen target found)")
@@ -24,6 +24,29 @@ endif()
 find_package(Python REQUIRED COMPONENTS Interpreter Development.Module NumPy
   OPTIONAL_COMPONENTS Development.SABIModule)
 find_package(nanobind CONFIG REQUIRED)
+
+# Binary distributions must retain the binding runtime's license notices too.
+if(EXISTS "${NB_DIR}/LICENSE")
+  set(_nanobind_license "${NB_DIR}/LICENSE")
+else()
+  execute_process(
+    COMMAND "${Python_EXECUTABLE}" -c
+      "from importlib.metadata import distribution; d = distribution('nanobind'); print(next(str(d.locate_file(f)) for f in d.files if f.name == 'LICENSE'))"
+    OUTPUT_VARIABLE _nanobind_license
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    COMMAND_ERROR_IS_FATAL ANY)
+endif()
+install(FILES "${_nanobind_license}" DESTINATION cbgen/licenses RENAME nanobind.txt)
+file(READ "${NB_DIR}/ext/robin_map/include/tsl/robin_map.h" _robin_header)
+string(FIND "${_robin_header}" "*/" _robin_license_end)
+if(_robin_license_end LESS 0)
+  message(FATAL_ERROR "Cannot locate robin-map license notice")
+endif()
+math(EXPR _robin_license_length "${_robin_license_end} + 2")
+string(SUBSTRING "${_robin_header}" 0 ${_robin_license_length} _robin_license)
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/robin-map-license.txt" "${_robin_license}\n")
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/robin-map-license.txt"
+  DESTINATION cbgen/licenses RENAME robin-map.txt)
 
 # "shared" links against the externally hosted nanobind-backend wheel/package,
 # a separately versioned package that pip resolves per-interpreter, giving a
@@ -47,6 +70,7 @@ else()
   nanobind_add_module(_core STABLE_ABI BACKEND_MODULE nanobind_backend ${CMAKE_CURRENT_SOURCE_DIR}/bindings.cpp)
 endif()
 target_link_libraries(_core PRIVATE BGEN::bgen)
+target_sources(_core PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/encoding.cpp)
 target_include_directories(_core PRIVATE ${Python_NumPy_INCLUDE_DIRS})
 
 install(TARGETS _core LIBRARY DESTINATION cbgen)

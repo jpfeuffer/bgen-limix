@@ -1,6 +1,6 @@
 # bgen
 
-C library and Python bindings for reading [BGEN files](https://www.well.ox.ac.uk/~gav/bgen_format/) (format specifications 1.2 and 1.3).
+C library and Python bindings for reading [BGEN files](https://www.well.ox.ac.uk/~gav/bgen_format/) and encoding layout-2 genotype payloads (format specifications 1.2 and 1.3).
 
 This repository is a maintained fork of the original limix/bgen and limix/cbgen projects, merged into a single codebase with a modern build system, nanobind-based Python bindings, and S3 support.
 
@@ -11,6 +11,7 @@ This repository is a maintained fork of the original limix/bgen and limix/cbgen 
 - Supports BGEN 1.2 and 1.3 format specifications
 - zlib and zstd decompression support
 - Metafile indexing for efficient random access
+- Native bounded-batch layout-2 probability and hard-call encoding
 
 ## Quick start (pixi)
 
@@ -41,6 +42,20 @@ Or in development mode:
 pip install -e ".[test]"
 pytest python/tests
 ```
+
+For a self-contained local CPython 3.12 wheel, including the private nanobind
+backend and bundled native libraries:
+
+```bash
+pixi run -e wheel python -m pip wheel --no-deps --no-build-isolation -w dist \
+  -Cbuild-dir=build-wheel \
+  -Ccmake.define.CMAKE_DISABLE_FIND_PACKAGE_bgen=ON \
+  -Ccmake.define.BGEN_NANOBIND_BACKEND=private -Cwheel.py-api= .
+```
+
+The empty `wheel.py-api` override is intentional: a private backend is specific
+to its build interpreter, so its wheel must be tagged `cp312-cp312`, not `abi3`.
+Bundled dependencies' license notices are installed with the wheel.
 
 ## Python usage
 
@@ -244,6 +259,95 @@ dependencies, use `--python-old /path/to/old-install --python-new
 `--old`/`--new`. These measurements include NumPy output allocation and bypass
 editable-install hooks.
 
+## Encoding layout-2 genotype blocks (4.15 development API)
+
+The encoder returns **uncompressed genotype payloads**, not complete BGEN
+files. File headers, variant identifiers, length prefixes and compression
+remain the caller's responsibility. It does not depend on VCZ or interpret
+format-specific NaN sentinel bit patterns.
+
+```python
+import numpy as np
+from cbgen import encode_layout2, encode_layout2_hardcalls
+
+payload, offsets = encode_layout2(
+    allele_counts=np.array([2], dtype=np.uint16),
+    ploidy=np.array([[2, 1]], dtype=np.uint8),
+    missing=np.array([[False, True]], dtype=bool),
+    phased=np.array([False], dtype=bool),
+    gp=np.array([[[0.5, 0.25, 0.25], [np.nan, np.nan, np.nan]]]),
+    bits=16,
+)
+first_block = payload[int(offsets[0]):int(offsets[1])]
+
+hard_payload, hard_offsets = encode_layout2_hardcalls(
+    genotypes=np.array([[[0, 1], [-1, -2]]], dtype=np.int8),
+    allele_counts=np.array([2], dtype=np.uint16),
+    phased=np.array([False], dtype=bool),
+)
+```
+
+Both interfaces are keyword-only:
+
+```text
+encode_layout2(*, allele_counts, ploidy, missing, phased,
+               gp=None, hp=None, bits=8, max_output_bytes=268435456)
+encode_layout2_hardcalls(*, genotypes, allele_counts, phased,
+                         ploidy=None, missing=None, bits=8,
+                         max_output_bytes=268435456)
+    -> (bytes, uint64[nvariants + 1] offsets)
+```
+
+All inputs must be aligned, native-endian, C-contiguous NumPy arrays with
+matching variant/sample dimensions. No implicit dtype or layout conversions
+are made. Read-only inputs are accepted; do not mutate inputs concurrently.
+Offsets start at zero and end at the payload length; every variant starts
+on a byte boundary. Empty batches, zero samples and zero ploidy are supported.
+The native measurement and encoding passes release the GIL.
+
+| Input | Dtype | Shape / meaning |
+| --- | --- | --- |
+| `allele_counts` | `uint16` | `(variants,)`, K in 1..65535 |
+| `ploidy` | `uint8` | `(variants, samples)`, P in 0..63 |
+| `missing` | `bool` | `(variants, samples)`, explicit whole-call missingness |
+| `phased` | `bool` | `(variants,)`, one phase flag per variant |
+| `gp` | `float32` or `float64` | `(variants, samples, gp_width)`, unphased states in BGEN colex order |
+| `hp` | `float32` or `float64` | `(variants, samples, hp_width)`, flattened haplotype-major simplexes |
+| `genotypes` | `int8`, `int16`, `int32` or `int64` | `(variants, samples, max_ploidy)`, allele indexes with -1 missing and -2 trailing fill |
+
+For each unphased sample, the first `C(P+K-1,P)` GP entries are active.
+For phased samples, the first `P*K` HP entries are active, arranged as P
+simplexes of K alleles. Width must cover all samples, including missing ones.
+Padding beyond active width is **ignored**, not validated. The caller must
+validate any external format's fill/missing conventions. Only the selected
+GP or HP field is read for a variant; an unused field may be omitted.
+
+Active nonmissing simplexes must be finite, in [0,1], and sum to one within
+absolute tolerance 1e-6 (no relative tolerance). They are normalized and
+quantized with stable largest-remainder rounding; exact ties favor earlier
+state indexes. The last state of each simplex is omitted. All bit depths
+1..32 use little-endian least-significant-bit-first packing. Explicitly
+missing probability samples skip numeric validation and store only zeros.
+At P=0, unphased GP still has one state (which must be one if nonmissing);
+phased HP has no states. Missingness remains explicit even at P=0.
+
+For hard calls, ploidy is derived from trailing -2 fill. Optional explicit
+ploidy must agree. Without an explicit `missing` array, any -1 allele marks
+the whole sample missing. With one, a nonmissing call containing -1 is an
+error; missing calls may contain valid alleles or -1, but all allele indexes
+and trailing fill are still checked. Multiallelic unphased hard calls map to
+the BGEN colex genotype rank. Hard calls are packed directly without
+materializing a dense probability array.
+
+The default allocation limit is 256 MiB of payload per batch, overridable by
+`max_output_bytes`. Each individual block must also fit a BGEN uint32 length
+field. Offsets and one variant descriptor per input variant are allocated
+separately; quantization scratch is reused and scales with the largest active
+simplex (approximately 24 bytes per state on 64-bit platforms). Chunk inputs
+to bound both input and scratch memory. Invalid values, insufficient widths,
+overflow and allocation limits raise errors; per-call data errors identify
+the zero-based variant and sample. No partial payload is returned.
+
 ## C API
 
 Link against the `bgen` library:
@@ -254,6 +358,16 @@ target_link_libraries(mytarget PRIVATE BGEN::bgen)
 ```
 
 See `include/bgen/bgen.h` for the full C API.
+The public `bgen/encode.h` declares `bgen_layout2_size` and
+`bgen_layout2_encode`, supporting the same numeric and hard-call models.
+Each `bgen_layout2_variant` contains explicit input buffer byte lengths and
+padding width. Measure first, allocate the payload and `nvariants+1` uint64
+offsets, then encode. Returns are 0 on success and -1 on error; an optional
+per-call `bgen_encode_error` gives the location and message (`SIZE_MAX` means
+not applicable). The size pass validates structure and hard calls; numeric
+probabilities are validated by the encode pass. On encode failure, C output
+buffers may be partially written and must be discarded. Output/input aliasing
+and concurrent input mutation are unsupported. No global encoder state is used.
 
 ## Acknowledgments
 

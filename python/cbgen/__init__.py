@@ -9,6 +9,7 @@ from cbgen import example, typing
 from cbgen._compat import bgen_file, bgen_metafile
 from cbgen._core import BgenFile as _BgenFile
 from cbgen._core import BgenMetafile, PartitionResult, VariantInfo
+from cbgen._core import encode_layout2, encode_layout2_hardcalls
 from cbgen._s3_utils import s3_env_from_storage_options
 from cbgen.example import BGEN_CACHE_HOME
 from cbgen.typing import (
@@ -38,6 +39,8 @@ __all__ = [
     "bgen_file",
     "bgen_metafile",
     "example",
+    "encode_layout2",
+    "encode_layout2_hardcalls",
     "typing",
 ]
 
