@@ -369,6 +369,69 @@ probabilities are validated by the encode pass. On encode failure, C output
 buffers may be partially written and must be discarded. Output/input aliasing
 and concurrent input mutation are unsupported. No global encoder state is used.
 
+### Specialized biallelic compatibility and fixed-stride encoding
+
+The following public APIs keep the specialized legacy biallelic hard-call
+paths in the native library, rather than in downstream format adapters:
+
+```text
+encode_layout2_hardcalls_legacy(genotypes, phased, *, max_output_bytes=268435456)
+    -> (uint8[variants, 10 + 3*samples] padded_blocks, uint32[variants] lengths)
+layout2_fixed_size(num_samples, uniform_ploidy, total_string_length) -> int
+encode_layout2_fixed(varid, rsid, chrom, allele1, allele2, position,
+                     genotypes, phased, out, uniform_ploidy, total_string_length)
+    -> None
+```
+
+`genotypes` must be contiguous `int8[variants,samples,2]`, `phased` is
+`bool[variants]`. Haploid calls use -2 in slot 1; -1 in either allele makes
+the whole call missing. These **compatibility** APIs reject -2 in slot 0,
+including all-fill calls. Use the general hard-call API for P=0. Empty sample
+axes retain the legacy declared ploidy range 2/2. Only `padded_blocks[v,
+:lengths[v]]` is encoded; trailing bytes are unspecified. No Python payload
+copy is required.
+
+`encode_layout2_fixed` fuses genotype encoding, identifying-field framing and
+zlib level-0 stored-block serialization into caller-owned output, with one
+reusable native genotype scratch buffer. Every sample must have the declared
+`uniform_ploidy` (1 or 2); mixed ploidy raises `NotImplementedError`.
+String fields are contiguous `uint8[variants,width]` padded byte rows, ending
+at the first NUL or row width. The sum of their actual lengths must equal
+`total_string_length` **for every variant**; callers can pad an identifier
+field to achieve a fixed total. Identifier lengths must fit uint16 and allele
+lengths uint32. `position` is contiguous non-negative `int32[variants]`.
+Invalid alleles, lengths, metadata and string budgets raise `ValueError`
+with variant/sample context where applicable.
+
+`out` must be a writable contiguous uint8 array, either 1D with at least
+`variants * layout2_fixed_size(...)` capacity, or exactly
+`(variants, layout2_fixed_size(...))`. Input/output overlap is rejected.
+Insufficient 1D capacity raises `cbgen.BufferTooSmall`, a `ValueError`
+subclass; malformed shapes/dtypes and read-only buffers raise `ValueError`.
+On failure, caller-owned output may be partially written and must be
+discarded. On success, any excess 1D capacity remains untouched. The output
+contains complete identifying fields and C/D length framing, but **no file
+header**; it requires layout-2/zlib flags in the caller's BGEN header.
+Stored DEFLATE chunks are deterministically at most 65535 bytes, with the
+RFC1950 Adler-32 supplied by the optimized zlib-ng dependency.
+
+Both specialized calls release the GIL and validate and encode hard calls
+in one native sample pass, without general combinatorial calculations or
+dense probability arrays. The general `encode_layout2_hardcalls` also selects
+the direct biallelic kernel for int8 inputs with K=2, bits=8 and width 1/2
+when explicit ploidy/missing arrays are absent; all other inputs use the
+general checked encoder. Its P=0 and missingness semantics do not change.
+The public C counterparts and bounded buffer descriptors are declared in
+`bgen/encode.h`.
+
+Reproduce installed-kernel timings with
+`pixi run -e wheel python scripts/benchmark_encode_hardcalls.py`.
+The optional `--backend vcz` runs an installed older VCZ implementation in its
+own environment for byte-hash and throughput comparisons; it is not a library
+dependency. The specialized implementation is independently written against
+the BGEN and RFC1950/1951 formats, preserving legacy observable behavior
+without incorporating Apache-licensed VCZ implementation source.
+
 ## Acknowledgments
 
 - [Marc Jan Bonder](https://github.com/Bonder-MJ) for bug-reporting and improvement suggestions.

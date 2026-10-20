@@ -10,6 +10,12 @@ from cbgen._compat import bgen_file, bgen_metafile
 from cbgen._core import BgenFile as _BgenFile
 from cbgen._core import BgenMetafile, PartitionResult, VariantInfo
 from cbgen._core import encode_layout2, encode_layout2_hardcalls
+from cbgen._core import (
+    BufferTooSmall,
+    encode_layout2_fixed,
+    encode_layout2_hardcalls_legacy,
+    layout2_fixed_size,
+)
 from cbgen._s3_utils import s3_env_from_storage_options
 from cbgen.example import BGEN_CACHE_HOME
 from cbgen.typing import (
@@ -41,6 +47,10 @@ __all__ = [
     "example",
     "encode_layout2",
     "encode_layout2_hardcalls",
+    "encode_layout2_hardcalls_legacy",
+    "encode_layout2_fixed",
+    "layout2_fixed_size",
+    "BufferTooSmall",
     "typing",
 ]
 

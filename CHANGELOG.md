@@ -1,5 +1,24 @@
 # Changelog
 
+## 4.15.0.dev1 - Unreleased
+
+### Added
+
+- Public specialized `encode_layout2_hardcalls_legacy`, returning padded
+  genotype-block rows and lengths, and fused `encode_layout2_fixed` /
+  `layout2_fixed_size` for caller-owned fixed-stride complete variant records.
+  Includes identifying fields, checked C/D framing and deterministic zlib
+  stored blocks; no Python assembly/compression or complete file writer.
+- Matching bounded C interfaces and contextual error statuses; public
+  `BufferTooSmall(ValueError)` for insufficient caller-owned output capacity.
+- Single-pass specialized biallelic 8-bit hard-call kernels and upstream
+  fast-path selection, preserving general P=0 semantics and legacy P=1/2
+  compatibility policy separately. Compile-time model/ploidy selection keeps
+  fixed-stride sample loops free of generic sorting/combinatorial overhead.
+- Independent byte/reader oracles, all-int8 invalid-allele checks, empty axes,
+  stored DEFLATE boundary/checksum tests, C buffer-boundary tests and
+  installed-kernel comparison tooling.
+
 ## 4.15.0.dev0 - Unreleased
 
 ### Added

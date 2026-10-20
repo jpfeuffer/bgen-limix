@@ -14,16 +14,24 @@ namespace nb = nanobind;
 using namespace nb::literals;
 
 namespace {
-PyArrayObject *array(nb::handle value, char const *name, int ndim, int dtype = -1) {
+struct BufferTooSmall : std::runtime_error {
+    using std::runtime_error::runtime_error;
+};
+
+PyArrayObject *array(nb::handle value, char const *name, int ndim, int dtype = -1,
+                     bool compatibility = false) {
     if (!PyArray_Check(value.ptr()))
         throw nb::type_error((std::string(name) + " must be a NumPy array").c_str());
     auto *a = reinterpret_cast<PyArrayObject *>(value.ptr());
     if (PyArray_NDIM(a) != ndim)
-        throw nb::value_error((std::string(name) + " has incorrect number of dimensions").c_str());
-    if (dtype >= 0 && PyArray_TYPE(a) != dtype)
+        throw nb::value_error((std::string(name) + " has wrong dimension").c_str());
+    if (dtype >= 0 && PyArray_TYPE(a) != dtype) {
+        if (compatibility) throw nb::value_error(("Wrong dtype for " + std::string(name)).c_str());
         throw nb::type_error((std::string(name) + " has incorrect dtype").c_str());
+    }
     if (!PyArray_IS_C_CONTIGUOUS(a) || !PyArray_ISALIGNED(a) || !PyArray_ISNOTSWAPPED(a))
-        throw nb::value_error((std::string(name) + " must be aligned, native-endian and C-contiguous").c_str());
+        throw nb::value_error((std::string(name) +
+            " must be aligned, native-endian and C-contiguous (NPY_ARRAY_IN_ARRAY)").c_str());
     return a;
 }
 
@@ -58,6 +66,11 @@ void check_error(int status, bgen_encode_error const &error) {
     if (error.sample != SIZE_MAX) message += ", sample " + std::to_string(error.sample);
     if (!message.empty()) message += ": ";
     message += error.message;
+    if (status == BGEN_ENCODE_BUFFER_TOO_SMALL) throw BufferTooSmall(message);
+    if (status == BGEN_ENCODE_MIXED_PLOIDY) {
+        PyErr_SetString(PyExc_NotImplementedError, message.c_str());
+        throw nb::python_error();
+    }
     throw nb::value_error(message.c_str());
 }
 
@@ -136,10 +149,139 @@ nb::tuple batch(nb::object allele_counts, nb::object ploidy, nb::object missing,
     }
     return run(variants, max_output_bytes);
 }
+
+nb::tuple legacy(nb::object genotypes, nb::object phased, size_t limit) {
+    auto *g = array(genotypes, "genotypes", 3, NPY_INT8, true);
+    auto *p = array(phased, "phased", 1, NPY_BOOL, true);
+    if (PyArray_DIM(g, 2) != 2)
+        throw nb::value_error("BGEN encoder expects (V, S, 2) genotypes");
+    npy_intp nv = PyArray_DIM(g, 0), ns = PyArray_DIM(g, 1);
+    if (PyArray_DIM(p, 0) != nv)
+        throw nb::value_error("phased.shape[0] must equal genotypes.shape[0]");
+    if (ns > (UINT32_MAX - 10) / 3)
+        throw nb::value_error("genotype block exceeds uint32 length");
+    size_t width = 10 + 3 * static_cast<size_t>(ns);
+    if (width > static_cast<size_t>(NPY_MAX_INTP) ||
+        static_cast<size_t>(nv) > std::min(limit, static_cast<size_t>(NPY_MAX_INTP)) / width)
+        throw nb::value_error("batch exceeds max_output_bytes");
+    npy_intp dims[2] = {nv, static_cast<npy_intp>(width)};
+    nb::object out = nb::steal<nb::object>(PyArray_EMPTY(2, dims, NPY_UINT8, 0));
+    nb::object lens = nb::steal<nb::object>(PyArray_EMPTY(1, dims, NPY_UINT32, 0));
+    if (!out.is_valid() || !lens.is_valid()) throw nb::python_error();
+    auto *a = reinterpret_cast<PyArrayObject *>(out.ptr());
+    auto *l = reinterpret_cast<PyArrayObject *>(lens.ptr());
+    bgen_encode_error error{};
+    int status;
+    {
+        nb::gil_scoped_release release;
+        status = bgen_layout2_hardcalls_legacy(
+            static_cast<int8_t const *>(PyArray_DATA(g)), static_cast<size_t>(PyArray_NBYTES(g)),
+            static_cast<uint8_t const *>(PyArray_DATA(p)), static_cast<size_t>(PyArray_NBYTES(p)),
+            static_cast<size_t>(nv), static_cast<uint32_t>(ns),
+            static_cast<uint8_t *>(PyArray_DATA(a)), static_cast<size_t>(PyArray_NBYTES(a)), width,
+            static_cast<uint32_t *>(PyArray_DATA(l)), static_cast<size_t>(nv), &error);
+    }
+    check_error(status, error);
+    return nb::make_tuple(out, lens);
+}
+
+size_t fixed_width(Py_ssize_t ns, int ploidy, Py_ssize_t strings) {
+    if (ns < 0 || strings < 0) throw nb::value_error("size arguments must be non-negative");
+    if (static_cast<size_t>(ns) > UINT32_MAX) throw nb::value_error("sample count exceeds uint32");
+    if (ploidy != 1 && ploidy != 2) throw nb::value_error("uniform_ploidy must be 1 or 2");
+    size_t result = 0;
+    bgen_encode_error error{};
+    check_error(bgen_layout2_fixed_size(static_cast<uint32_t>(ns), static_cast<uint8_t>(ploidy),
+                                      static_cast<size_t>(strings), &result, &error), error);
+    return result;
+}
+
+void fixed(nb::object varid, nb::object rsid, nb::object chrom, nb::object allele1,
+           nb::object allele2, nb::object position, nb::object genotypes,
+           nb::object phased, nb::object out, int uniform_ploidy, Py_ssize_t total_string_length) {
+    auto *g = array(genotypes, "genotypes", 3, NPY_INT8, true);
+    if (PyArray_DIM(g, 2) != 2)
+        throw nb::value_error("BGEN encoder expects (V, S, 2) genotypes");
+    npy_intp nv = PyArray_DIM(g, 0), ns = PyArray_DIM(g, 1);
+    auto *p = array(phased, "phased", 1, NPY_BOOL, true);
+    auto *pos = array(position, "position", 1, NPY_INT32, true);
+    if (PyArray_DIM(p, 0) != nv || PyArray_DIM(pos, 0) != nv)
+        throw nb::value_error("all per-variant inputs must share num_variants axis");
+    auto *id = array(varid, "varid", 2, NPY_UINT8, true);
+    auto *rs = array(rsid, "rsid", 2, NPY_UINT8, true);
+    auto *chr = array(chrom, "chrom", 2, NPY_UINT8, true);
+    auto *a1 = array(allele1, "allele1", 2, NPY_UINT8, true);
+    auto *a2 = array(allele2, "allele2", 2, NPY_UINT8, true);
+    PyArrayObject *fields[5] = {id, rs, chr, a1, a2};
+    bgen_layout2_fixed_batch b{};
+    bgen_encode_strings *strings[5] = {&b.varid, &b.rsid, &b.chrom, &b.allele1, &b.allele2};
+    for (size_t f = 0; f < 5; ++f) {
+        if (PyArray_DIM(fields[f], 0) != nv)
+            throw nb::value_error("all per-variant inputs must share num_variants axis");
+        *strings[f] = {static_cast<uint8_t const *>(PyArray_DATA(fields[f])),
+                      static_cast<size_t>(PyArray_NBYTES(fields[f])),
+                      static_cast<size_t>(PyArray_DIM(fields[f], 1))};
+    }
+    if (!PyArray_Check(out.ptr())) throw nb::type_error("out must be a NumPy array");
+    auto *raw = reinterpret_cast<PyArrayObject *>(out.ptr());
+    int ndim = PyArray_NDIM(raw);
+    if (ndim != 1 && ndim != 2) throw nb::value_error("out_buf has wrong dimension (expected 1D or 2D)");
+    auto *output = array(out, "out_buf", ndim, NPY_UINT8, true);
+    if (!PyArray_ISWRITEABLE(output)) throw nb::value_error("out_buf must be writeable");
+    size_t width = fixed_width(ns, uniform_ploidy, total_string_length);
+    if (width > static_cast<size_t>(NPY_MAX_INTP) ||
+        static_cast<size_t>(nv) > static_cast<size_t>(NPY_MAX_INTP) / width)
+        throw nb::value_error("fixed output dimensions overflow");
+    if (ndim == 2 && (PyArray_DIM(output, 0) != nv ||
+                      PyArray_DIM(output, 1) != static_cast<npy_intp>(width)))
+        throw nb::value_error("out_buf has wrong dimension: expected (variants, layout2_fixed_size(...))");
+    if (static_cast<size_t>(PyArray_NBYTES(output)) < static_cast<size_t>(nv) * width)
+        throw BufferTooSmall("out_buf is too small");
+    auto *out_ptr = static_cast<uint8_t *>(PyArray_DATA(output));
+    // Reject overlapping views before native writes can corrupt borrowed input.
+    auto overlap = [&](PyArrayObject *input) {
+        uintptr_t start = reinterpret_cast<uintptr_t>(PyArray_DATA(input));
+        uintptr_t end = start + static_cast<size_t>(PyArray_NBYTES(input));
+        uintptr_t out_start = reinterpret_cast<uintptr_t>(out_ptr);
+        uintptr_t out_end = out_start + static_cast<size_t>(PyArray_NBYTES(output));
+        if (end > start && out_end > out_start && start < out_end && out_start < end)
+            throw nb::value_error("out must not overlap input buffers");
+    };
+    for (auto *field : fields) overlap(field);
+    for (auto *input : {g, p, pos}) overlap(input);
+    b.position = static_cast<int32_t const *>(PyArray_DATA(pos));
+    b.position_bytes = static_cast<size_t>(PyArray_NBYTES(pos));
+    b.genotypes = static_cast<int8_t const *>(PyArray_DATA(g));
+    b.genotypes_bytes = static_cast<size_t>(PyArray_NBYTES(g));
+    b.phased = static_cast<uint8_t const *>(PyArray_DATA(p));
+    b.phased_bytes = static_cast<size_t>(PyArray_NBYTES(p));
+    b.nvariants = static_cast<size_t>(nv);
+    b.nsamples = static_cast<uint32_t>(ns);
+    b.uniform_ploidy = static_cast<uint8_t>(uniform_ploidy);
+    b.total_string_length = static_cast<size_t>(total_string_length);
+    int status;
+    bgen_encode_error error{};
+    size_t output_bytes = static_cast<size_t>(PyArray_NBYTES(output));
+    {
+        nb::gil_scoped_release release;
+        status = bgen_layout2_fixed_encode(&b, out_ptr, output_bytes, &error);
+    }
+    check_error(status, error);
+}
 }
 
 void register_encoding(nb::module_ &m) {
     if (_import_array() < 0) throw nb::python_error();
+    nb::exception<BufferTooSmall>(m, "BufferTooSmall", PyExc_ValueError);
+    m.def("encode_layout2_hardcalls_legacy", &legacy, "genotypes"_a, "phased"_a,
+        nb::kw_only(), "max_output_bytes"_a = 268435456,
+        "Encode biallelic int8 (V,S,2) hard calls into padded uint8 rows and uint32 lengths.");
+    m.def("layout2_fixed_size", &fixed_width, "num_samples"_a,
+          "uniform_ploidy"_a, "total_string_length"_a);
+    m.def("encode_layout2_fixed", &fixed, "varid"_a, "rsid"_a, "chrom"_a,
+          "allele1"_a, "allele2"_a, "position"_a, "genotypes"_a, "phased"_a,
+          "out"_a, "uniform_ploidy"_a, "total_string_length"_a,
+          "Write fixed-stride biallelic full variant records with stored zlib compression.");
     m.def("encode_layout2", [](nb::object allele_counts, nb::object ploidy,
         nb::object missing, nb::object phased, nb::object gp, nb::object hp,
         int bits, size_t max_output_bytes) {
