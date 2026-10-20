@@ -259,7 +259,7 @@ dependencies, use `--python-old /path/to/old-install --python-new
 `--old`/`--new`. These measurements include NumPy output allocation and bypass
 editable-install hooks.
 
-## Encoding layout-2 genotype blocks (4.15 development API)
+## Encoding layout-2 genotype blocks (4.15 API)
 
 The encoder returns **uncompressed genotype payloads**, not complete BGEN
 files. File headers, variant identifiers, length prefixes and compression

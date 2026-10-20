@@ -1,6 +1,6 @@
 # Changelog
 
-## 4.15.0.dev1 - Unreleased
+## 4.15.0 - 2026-10-20
 
 ### Added
 
@@ -18,10 +18,6 @@
 - Independent byte/reader oracles, all-int8 invalid-allele checks, empty axes,
   stored DEFLATE boundary/checksum tests, C buffer-boundary tests and
   installed-kernel comparison tooling.
-
-## 4.15.0.dev0 - Unreleased
-
-### Added
 
 - Public C `bgen_layout2_size` / `bgen_layout2_encode` bounded batch encoders
   and Python `encode_layout2` / `encode_layout2_hardcalls` returning raw
