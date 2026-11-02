@@ -79,8 +79,9 @@ struct Credentials {
 };
 
 /* Walks the credential chain.  Returns false when no source yields
- * credentials, which the caller may treat as "send unsigned". */
-bool ResolveCredentials(Credentials* out);
+ * credentials, which the caller may treat as "send unsigned".  Cached results
+ * respect expiry and provider configuration; force_refresh bypasses them. */
+bool ResolveCredentials(Credentials* out, bool force_refresh = false);
 
 /* ---------------------------------------------------------------------------
  * HTTP layer
@@ -102,7 +103,19 @@ struct Response {
   const std::string* Header(const char* name) const;
 };
 
+struct HttpSession {
+#ifdef S3STREAM_ENABLE
+  CURL* handle;
+
+  HttpSession() : handle(nullptr) {}
+  ~HttpSession();
+  HttpSession(const HttpSession&) = delete;
+  HttpSession& operator=(const HttpSession&) = delete;
+#endif
+};
+
 struct Request {
+  HttpSession* session;
   std::string url;
   /* Signing inputs; ignored when sign is false. */
   std::string region;
@@ -122,7 +135,7 @@ struct Request {
    * which no caller should use for a response it did not size first. */
   size_t max_body;
 
-  Request() : creds(nullptr), sign(true), head(false), max_body(0) {}
+  Request() : session(nullptr), creds(nullptr), sign(true), head(false), max_body(0) {}
 };
 
 /* Issues the request, retrying throttling and transient 5xx responses with

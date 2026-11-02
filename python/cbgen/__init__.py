@@ -16,7 +16,7 @@ from cbgen._core import (
     encode_layout2_hardcalls_legacy,
     layout2_fixed_size,
 )
-from cbgen._s3_utils import s3_env_from_storage_options
+from cbgen._s3_utils import normalize_s3_path, s3_env_from_storage_options
 from cbgen.example import BGEN_CACHE_HOME
 from cbgen.typing import (
     Genotype,
@@ -66,7 +66,7 @@ class BgenFile:
 
     def __init__(self, filepath: Union[str, "os.PathLike[str]"]):
         with s3_env_from_storage_options(filepath):
-            self._impl = _BgenFile(str(filepath))
+            self._impl = _BgenFile(normalize_s3_path(filepath))
 
     @property
     def filepath(self) -> str:

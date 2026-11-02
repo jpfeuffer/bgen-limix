@@ -11,7 +11,7 @@ import numpy.typing as npt
 
 from cbgen._core import BgenFile as _BgenFile
 from cbgen._core import BgenMetafile as _BgenMetafile
-from cbgen._s3_utils import s3_env_from_storage_options
+from cbgen._s3_utils import normalize_s3_path, s3_env_from_storage_options
 from cbgen.typing import Genotype, Partition, Variants
 
 __all__ = ["bgen_file", "bgen_metafile"]
@@ -28,14 +28,14 @@ class bgen_file:
     """
 
     def __init__(self, filepath: Union[str, "os.PathLike[str]"]):
-        s = str(filepath)
-        if s.startswith(("s3://", "http://", "https://")):
+        path = normalize_s3_path(filepath)
+        if path.startswith(("s3://", "http://", "https://")):
             # Path() collapses "://" to ":/", corrupting these URIs.
             self._filepath = filepath
         else:
             self._filepath = Path(filepath)
         with s3_env_from_storage_options(filepath):
-            self._impl = _BgenFile(str(self._filepath))
+            self._impl = _BgenFile(normalize_s3_path(self._filepath))
 
     @property
     def filepath(self) -> "Union[Path, os.PathLike[str], str]":
