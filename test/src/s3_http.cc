@@ -199,11 +199,30 @@ int main() {
   cass_cond(errno == ENOENT);
 
   HttpServer server;
+  s3stream_credentials failure_creds{};
+  failure_creds.endpoint_url = server.url.c_str();
+  failure_creds.region = "us-east-1";
+  failure_creds.no_sign_request = 1;
+  failure_creds.force_path_style = 1;
   for (const auto& failure : std::vector<std::pair<std::string, int>>{
            {"missing", ENOENT}, {"denied", EACCES}}) {
+    const std::string url = server.url + "/" + failure.first;
+    const std::string uri = "s3://bucket/" + failure.first;
     errno = 0;
-    cass_cond(s3stream_open((server.url + "/" + failure.first).c_str()) == nullptr);
-    cass_cond(errno == failure.second);
+    cass_cond(s3stream_open(url.c_str()) == nullptr);
+    cass_equal_int(errno, failure.second);
+    cass_cond(std::string(s3stream_last_error()).find("HTTP ") != std::string::npos);
+    errno = 0;
+    cass_cond(stream_handle_open(url.c_str()) == nullptr);
+    cass_equal_int(errno, failure.second);
+    cass_cond(std::string(s3stream_last_error()).find("HTTP ") != std::string::npos);
+    errno = 0;
+    cass_cond(s3stream_open_with_credentials(uri.c_str(), &failure_creds) == nullptr);
+    cass_equal_int(errno, failure.second);
+    cass_cond(std::string(s3stream_last_error()).find("HTTP ") != std::string::npos);
+    errno = 0;
+    cass_cond(stream_handle_open_with_credentials(uri.c_str(), &failure_creds) == nullptr);
+    cass_equal_int(errno, failure.second);
     cass_cond(std::string(s3stream_last_error()).find("HTTP ") != std::string::npos);
   }
 
