@@ -99,4 +99,11 @@ if(BGEN_ENABLE_S3)
     add_test(NAME s3_http COMMAND test_s3_http)
     set_tests_properties(s3_http PROPERTIES TIMEOUT 30)
   endif()
+
+  add_executable(test_credential_process src/credential_process.c)
+  target_link_libraries(test_credential_process PRIVATE BGEN::bgen BGEN::s3)
+  target_compile_options(test_credential_process PRIVATE
+    $<$<COMPILE_LANGUAGE:C>:${BGEN_C_WARNING_FLAGS}>)
+  target_compile_definitions(test_credential_process PRIVATE BGEN_S3_SUPPORT)
+  add_test(NAME credential_process COMMAND test_credential_process)
 endif()
