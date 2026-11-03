@@ -81,6 +81,11 @@ jobs:
           # there is no MinGW DLL version conflict any more.
           $pixi_bin = "${{ github.workspace }}\.pixi\envs\default\Library\bin"
           $env:PATH = "$pixi_bin;C:\mingw64\bin;$env:PATH"
+          & "${{ github.workspace }}\build\test\test_credentials_file.exe"
+          if ($LASTEXITCODE -eq -1073741511) {
+            & C:\mingw64\bin\objdump.exe -p "${{ github.workspace }}\build\test\test_credentials_file.exe"
+            Get-ChildItem "$pixi_bin\*pthread*.dll", "C:\mingw64\bin\*pthread*.dll", "$pixi_bin\*stdc++*.dll", "C:\mingw64\bin\*stdc++*.dll" | Select-Object FullName
+          }
           & "$pixi_bin\ctest.exe" --test-dir "${{ github.workspace }}\build" `
             -C ${{ matrix.build_type }} --output-on-failure
   test-python:
