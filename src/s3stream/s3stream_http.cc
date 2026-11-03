@@ -5,6 +5,7 @@
 
 #ifdef S3STREAM_ENABLE
 
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -318,7 +319,10 @@ CURLcode PerformOnce(CURL* curl, const Request& req, Response* out,
 
 HttpSession::~HttpSession() {
   if (handle) {
+    /* Closing cached connections must not overwrite the caller's error. */
+    const int saved_errno = errno;
     curl_easy_cleanup(handle);
+    errno = saved_errno;
   }
 }
 
