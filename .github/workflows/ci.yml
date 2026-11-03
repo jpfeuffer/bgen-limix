@@ -75,17 +75,8 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          # pixi run resets PATH; prepend Library\bin for the conda DLLs
-          # (zlib-ng, zstd, libcurl …).  libstdc++ / libgcc are now statically
-          # linked via the MINGW target_link_options in CMakeLists.txt, so
-          # there is no MinGW DLL version conflict any more.
           $pixi_bin = "${{ github.workspace }}\.pixi\envs\default\Library\bin"
-          $env:PATH = "$pixi_bin;C:\mingw64\bin;$env:PATH"
-          & "${{ github.workspace }}\build\test\test_credentials_file.exe"
-          if ($LASTEXITCODE -eq -1073741511) {
-            & C:\mingw64\bin\objdump.exe -p "${{ github.workspace }}\build\test\test_credentials_file.exe"
-            Get-ChildItem "$pixi_bin\*pthread*.dll", "C:\mingw64\bin\*pthread*.dll", "$pixi_bin\*stdc++*.dll", "C:\mingw64\bin\*stdc++*.dll" | Select-Object FullName
-          }
+          $env:PATH = "C:\mingw64\bin;$pixi_bin;$env:PATH"
           & "$pixi_bin\ctest.exe" --test-dir "${{ github.workspace }}\build" `
             -C ${{ matrix.build_type }} --output-on-failure
   test-python:
@@ -267,11 +258,10 @@ jobs:
           pixi run cmake --build build --config Debug
           if ($LASTEXITCODE -ne 0) { throw "cmake build failed" }
 
-          # Same DLL-path fix as the test-c Windows step (zlib-ng, zstd, libcurl).
           # Single-config Ninja generator (see CMakePresets.json), so the
           # binary lands directly in build\test, no per-config subfolder.
           $pixi_bin = "${{ github.workspace }}\.pixi\envs\default\Library\bin"
-          $env:PATH = "$pixi_bin;C:\mingw64\bin;$env:PATH"
+          $env:PATH = "C:\mingw64\bin;$pixi_bin;$env:PATH"
           & "${{ github.workspace }}\build\test\test_s3_open.exe"
           if ($LASTEXITCODE -ne 0) { throw "test_s3_open failed" }
 
