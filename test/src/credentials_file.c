@@ -145,6 +145,18 @@ int main(void)
     unsetenv("AWS_ACCESS_KEY_ID");
     unsetenv("AWS_SECRET_ACCESS_KEY");
 
+    FILE* changed = fopen(tmppath, "w");
+    cass_cond(changed != NULL);
+    if (changed) {
+        fputs("[default]\naws_access_key_id = UPDATEDKEY\n"
+              "aws_secret_access_key = updated-secret\n", changed);
+        fclose(changed);
+        found = s3stream_test_resolve_credentials(
+            access, sizeof access, secret, sizeof secret, token, sizeof token);
+        cass_cond(found == 1);
+        cass_cond(strcmp(access, "UPDATEDKEY") == 0);
+    }
+
     /* ── Cleanup ─────────────────────────────────────────────────────────── */
     unlink(tmppath);
     unsetenv("AWS_SHARED_CREDENTIALS_FILE");

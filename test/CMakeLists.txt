@@ -91,6 +91,15 @@ if(BGEN_ENABLE_S3)
   target_compile_definitions(test_credentials_file PRIVATE BGEN_S3_SUPPORT)
   add_test(NAME credentials_file COMMAND test_credentials_file)
 
+  if(UNIX)
+    find_package(Threads REQUIRED)
+    add_executable(test_s3_http src/s3_http.cc)
+    target_link_libraries(test_s3_http PRIVATE BGEN::s3 Threads::Threads)
+    target_compile_features(test_s3_http PRIVATE cxx_std_17)
+    add_test(NAME s3_http COMMAND test_s3_http)
+    set_tests_properties(s3_http PROPERTIES TIMEOUT 30)
+  endif()
+
   add_executable(test_credential_process src/credential_process.c)
   target_link_libraries(test_credential_process PRIVATE BGEN::bgen BGEN::s3)
   target_compile_options(test_credential_process PRIVATE

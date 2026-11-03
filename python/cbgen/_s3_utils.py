@@ -6,6 +6,12 @@ import contextlib
 import os
 
 
+def normalize_s3_path(filepath) -> str:
+    """Return a native filename, normalizing the s3a URI alias to s3."""
+    path = str(filepath)
+    return "s3://" + path[6:] if path.startswith("s3a://") else path
+
+
 @contextlib.contextmanager
 def s3_env_from_storage_options(filepath):
     """Temporarily set AWS env vars from a UPath/fsspec ``storage_options`` dict.

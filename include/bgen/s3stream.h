@@ -111,7 +111,16 @@ S3_EXPORT int64_t s3stream_get_chunk_size(void);
  *   7. unsigned, if nothing above yields credentials
  * The profile is selected by AWS_PROFILE (default "default").
  *
- * Returns NULL on failure; s3stream_last_error() explains why. */
+ * Ambient credentials are cached across opens for at most 60 seconds, never
+ * past their refresh threshold. Profile, provider-environment and credential
+ * file changes invalidate the cache; failed lookups are cached for 5 seconds.
+ * Environment keys and explicit per-open keys bypass the cache. An ExpiredToken
+ * response forces a fresh lookup. Each stream reuses its own HTTP connections.
+ *
+ * Returns NULL on failure; s3stream_last_error() explains why. Sets errno to
+ * ENOENT for HTTP 404, EACCES for HTTP 401/403, EINVAL for invalid arguments,
+ * ENOSYS when streaming support is disabled, or EIO for other remote failures.
+ * Local paths retain fopen()'s errno. */
 S3_EXPORT FILE* s3stream_open(const char* path);
 
 /* As s3stream_open(), but uses the supplied credentials instead of the

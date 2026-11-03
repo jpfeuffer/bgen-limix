@@ -1,11 +1,39 @@
 """Tests for cbgen Python bindings."""
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
 
 from cbgen import BgenFile, BgenMetafile, example
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+@pytest.mark.parametrize("cloud_object", [False, True])
+def test_s3a_path_normalization(monkeypatch, legacy, cloud_object):
+    import cbgen
+    from cbgen import _compat
+
+    class CloudPath:
+        storage_options = {"key": "path-key", "secret": "path-secret"}
+
+        def __str__(self):
+            return "s3a://bucket/example.bgen"
+
+    def native_open(path):
+        import os
+
+        assert path == "s3://bucket/example.bgen"
+        if cloud_object:
+            assert os.environ["AWS_ACCESS_KEY_ID"] == "path-key"
+            assert os.environ["AWS_SECRET_ACCESS_KEY"] == "path-secret"
+        return SimpleNamespace(filepath=path, close=lambda: None)
+
+    monkeypatch.setattr(_compat if legacy else cbgen, "_BgenFile", native_open)
+    factory = _compat.bgen_file if legacy else cbgen.BgenFile
+    reader = factory(CloudPath() if cloud_object else "s3a://bucket/example.bgen")
+    reader.close()
 
 
 def test_haplotypes_basic():

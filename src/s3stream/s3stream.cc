@@ -45,6 +45,7 @@ void SetError(const char* fmt, ...) {
   va_start(args, fmt);
   vsnprintf(g_error, sizeof(g_error), fmt, args);
   va_end(args);
+  errno = EIO;
 }
 
 }  // namespace s3stream
@@ -154,11 +155,17 @@ extern "C" int stream_handle_set_chunk_size(stream_handle* handle,
 }
 
 extern "C" FILE* s3stream_open(const char* path) {
+  if (!path) {
+    s3stream::SetError("null path");
+    errno = EINVAL;
+    return nullptr;
+  }
   if (s3stream_is_remote(path)) {
     s3stream::SetError(
         "%s: this build has no S3/HTTP support (rebuild with S3STREAM_ENABLE "
         "and libcurl)",
         path);
+      errno = ENOSYS;
     return nullptr;
   }
   return fopen(path, "rb");
@@ -175,6 +182,7 @@ extern "C" stream_handle* stream_handle_open_with_credentials(
   (void)creds;
   if (!path) {
     s3stream::SetError("null path");
+    errno = EINVAL;
     return nullptr;
   }
   if (s3stream_is_remote(path)) {
@@ -182,11 +190,14 @@ extern "C" stream_handle* stream_handle_open_with_credentials(
         "%s: this build has no S3/HTTP support (rebuild with S3STREAM_ENABLE "
         "and libcurl)",
         path);
+    errno = ENOSYS;
     return nullptr;
   }
   FILE* f = fopen(path, "rb");
   if (!f) {
-    s3stream::SetError("%s: %s", path, strerror(errno));
+    const int open_errno = errno;
+    s3stream::SetError("%s: %s", path, strerror(open_errno));
+    errno = open_errno;
     return nullptr;
   }
   stream_handle* handle = new stream_handle();
@@ -383,6 +394,7 @@ bool ShouldUsePathStyle(const std::string& bucket, bool forced,
  * ------------------------------------------------------------------------- */
 
 struct StreamState {
+  HttpSession session;
   std::string url;
   std::string region;
   Credentials creds;
@@ -420,8 +432,9 @@ struct StreamState {
         chunk_size(DefaultChunkSize()) {}
 };
 
-Request MakeRequest(const StreamState* state) {
+Request MakeRequest(StreamState* state) {
   Request req;
+  req.session = &state->session;
   req.url = state->url;
   req.region = state->region;
   req.sign = state->sign;
@@ -464,6 +477,11 @@ void DescribeHttpFailure(const StreamState* state, const Response& response) {
       break;
   }
   SetError("%s: HTTP %ld%s", state->display.c_str(), response.status, hint);
+  if (response.status == 404) {
+    errno = ENOENT;
+  } else if ((response.status == 401) || (response.status == 403)) {
+    errno = EACCES;
+  }
 }
 
 /* Performs `req`.  If S3 reports the credentials as expired, re-reads the
@@ -483,7 +501,7 @@ bool PerformWithRefresh(StreamState* state, const Request& req,
     return true;
   }
   Credentials fresh;
-  if (!ResolveCredentials(&fresh) ||
+  if (!ResolveCredentials(&fresh, true) ||
       ((fresh.access_key == state->creds.access_key) &&
        (fresh.session_token == state->creds.session_token))) {
     SetError(
@@ -967,6 +985,7 @@ StreamState* ProbeRemote(const char* path, const s3stream_credentials* creds) {
   std::string key;
   if (!ParseS3Uri(path, &bucket, &key)) {
     SetError("%s: not a valid S3 URI (expected s3://bucket/key)", path);
+    errno = EINVAL;
     delete state;
     return nullptr;
   }
@@ -990,6 +1009,7 @@ StreamState* ProbeRemote(const char* path, const s3stream_credentials* creds) {
     if (!IsValidAccountId(owner)) {
       SetError("%s: expected bucket owner must be a 12-digit AWS account ID",
                path);
+      errno = EINVAL;
       delete state;
       return nullptr;
     }
@@ -1065,6 +1085,7 @@ extern "C" int s3stream_set_expected_bucket_owner(const char* account_id) {
   if (!s3stream::IsValidAccountId(account_id)) {
     s3stream::SetError(
         "expected bucket owner must be a 12-digit AWS account ID");
+    errno = EINVAL;
     return -1;
   }
   s3stream::g_expected_bucket_owner = account_id;
@@ -1096,6 +1117,7 @@ extern "C" int stream_handle_set_chunk_size(stream_handle* handle,
 extern "C" FILE* s3stream_open(const char* path) {
   if (!path) {
     s3stream::SetError("null path");
+    errno = EINVAL;
     return nullptr;
   }
   if (!s3stream_is_remote(path)) {
@@ -1108,10 +1130,12 @@ extern "C" FILE* s3stream_open_with_credentials(
     const char* path, const s3stream_credentials* creds) {
   if (!path) {
     s3stream::SetError("null path");
+    errno = EINVAL;
     return nullptr;
   }
   if (!creds) {
     s3stream::SetError("%s: null credentials", path);
+    errno = EINVAL;
     return nullptr;
   }
   if (!s3stream_is_remote(path)) {
@@ -1124,6 +1148,7 @@ extern "C" stream_handle* stream_handle_open_with_credentials(
     const char* path, const s3stream_credentials* creds) {
   if (!path) {
     s3stream::SetError("null path");
+    errno = EINVAL;
     return nullptr;
   }
   stream_handle* handle = new stream_handle();
@@ -1134,7 +1159,9 @@ extern "C" stream_handle* stream_handle_open_with_credentials(
   if (!s3stream_is_remote(path)) {
     handle->local = fopen(path, "rb");
     if (!handle->local) {
-      s3stream::SetError("%s: %s", path, strerror(errno));
+      const int open_errno = errno;
+      s3stream::SetError("%s: %s", path, strerror(open_errno));
+      errno = open_errno;
       delete handle;
       return nullptr;
     }
